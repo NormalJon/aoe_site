@@ -133,10 +133,12 @@ class Blueprints:
     @staticmethod
     def _role(kind, name, cl):
         if kind == 'unit':
-            if 'villager' in cl:
+            if 'villager' in cl or 'instant_drop_off_unit' in cl:   # the latter: Viking Bondi, worker-warriors
                 return 'villager'
             if 'trade_cart' in cl or 'trader' in name.lower():
                 return 'trader'
+            if 'non_aggressive' in cl:                                # fishing boats, trade ships, cattle
+                return 'civilian'
             if 'monk' in cl or 'religious' in cl:
                 return 'monk'
             if 'scout' in cl:
@@ -323,7 +325,7 @@ def mmss(s):
 def analyze_replay(path, bp=None):
     bp = bp or blueprints()
     path = Path(path)
-    key = CACHE / 'analysis' / (re.sub(r'[^A-Za-z0-9_.-]', '_', path.name) + f'.{int(path.stat().st_mtime)}.v3.json')
+    key = CACHE / 'analysis' / (re.sub(r'[^A-Za-z0-9_.-]', '_', path.name) + f'.{int(path.stat().st_mtime)}.v4.json')
     if key.exists():
         return json.loads(key.read_text(encoding='utf-8'))
     r = aoe4rec.load(path)
@@ -369,6 +371,7 @@ def analyze_replay(path, bp=None):
             'apm_replay': round(r['total_commands'].get(p.pid, 0) / max(1, r['duration'] / 60)),
             'villagers': by_role.get('villager', 0), 'traders': by_role.get('trader', 0), 'monks': by_role.get('monk', 0), 'scouts': by_role.get('scout', 0),
             'military': len(mil), 'by_role': dict(by_role), 'by_unit': dict(by_unit.most_common()), 'by_unit_exact': dict(by_unit_exact.most_common()),
+            'military_by_unit': dict(Counter(b['base'] for _, b in mil).most_common()),
             'first_military': {'time': first_mil[0], 'name': first_mil[1]['name']} if first_mil else None,
             'military_by_6': before(360, mil), 'military_by_8': before(480, mil), 'military_by_10': before(600, mil),
             'cavalry_by_6': before(360, [x for x in mil if x[1]['role'] == 'cavalry']),
@@ -413,8 +416,7 @@ def player_tags(pl, duration, game_players):
         if pl['defense_by_12'] >= 4:
             tags.append(tag('turtle', 'Turtle', f"{pl['defense_by_12']} towers/outposts/keeps/gates placed before 12:00"))
     if pl['military'] >= 20:
-        civilian = {'Villager', 'Trader', 'Monk', 'Scout'}
-        best = max(((n, k) for k, n in pl['by_unit'].items() if k not in civilian), default=(0, None))
+        best = max(((n, k) for k, n in (pl.get('military_by_unit') or {}).items()), default=(0, None))
         if best[1] and best[0] / pl['military'] >= 0.7:
             tags.append(tag('mono_comp', f'Mono-comp: {best[1]}', f"{best[0]} of {pl['military']} military units were {best[1]} ({100 * best[0] / pl['military']:.0f}%)"))
         siege = pl['by_role'].get('siege', 0)
