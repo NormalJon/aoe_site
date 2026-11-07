@@ -10,3 +10,7 @@ Thumbs.db
 # local scratch
 *.log
 .env
+
+# local companion (personal config, downloaded replays, analysis cache)
+forge.local.json
+cache/

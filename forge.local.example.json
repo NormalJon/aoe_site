@@ -1,0 +1,9 @@
+{
+  "me": 123456,
+  "friends": [
+    { "profile_id": 234567, "name": "FriendOne" },
+    { "profile_id": 345678, "name": "FriendTwo" }
+  ],
+  "replay_dirs": ["auto"],
+  "max_game_pages": 20
+}

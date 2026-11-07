@@ -9,6 +9,7 @@ import * as civs from './pages/civs.js';
 import * as maps from './pages/maps.js';
 import * as live from './pages/live.js';
 import * as data from './pages/data.js';
+import * as mygames from './pages/mygames.js';
 
 const routes = [
   { test: p => p.length === 0, page: home, nav: null },
@@ -19,6 +20,7 @@ const routes = [
   { test: p => p[0] === 'maps', page: maps, nav: 'maps' },
   { test: p => p[0] === 'live', page: live, nav: 'live' },
   { test: p => p[0] === 'data', page: data, nav: 'data' },
+  { test: p => p[0] === 'mygames', page: mygames, nav: 'mygames' },
 ];
 const notFound = { page: { render: app => { app.append(notice('Page not found. ', el('a', { href: '#/' }, 'Go home'))); } }, nav: null };
 

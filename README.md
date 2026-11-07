@@ -33,8 +33,48 @@ when set; the Claude desktop launch config in `.claude/launch.json` uses it.
 | `#/maps` · `#/maps/:id` | Maps | Map pool share, lengths, best civ per map; per-map civ win rates |
 | `#/live` | Live | In-progress games (auto-refresh), busiest mode/server, just-finished results |
 | `#/data` | Data & sources | Live reachability check, full endpoint inventory, terms, and the official-API situation |
+| `#/mygames` · `#/mygames/:id` | My games (local companion) | Every game on your record with official counters and replay analysis: filter by mode, friend, tag, result; per-game team scoreboards, a unit-by-player matrix, army production over time, build orders and rule-based tags with explanations |
 
 Dark and light themes (toggle in the header, follows the OS by default). Responsive down to phone width.
+
+## My games — the local companion
+
+The public pages work from any static host. **My games** needs `server.py`, because it reads replay files from
+your own Age of Empires IV folder and calls the official backend. Set it up once:
+
+1. Copy `forge.local.example.json` to `forge.local.json` and fill in your AoE4 World profile id (`me`) and the
+   friends you want tagged (profile id + display name). The file is gitignored.
+2. Run `py -3 server.py` and open `http://127.0.0.1:8000/#/mygames`.
+3. Click **Analyse local replays** once; later games are analysed on demand when you open them.
+
+Where the data comes from, per game:
+
+| Source | What it adds | Availability |
+|---|---|---|
+| AoE4 World API | players, civs, ratings and rating change, result, map, duration | every game |
+| World's Edge community API (`getRecentMatchHistory`) | per-player **official counters**: units produced / killed / lost, buildings built / lost, upgrades, total commands (APM), rating before → after | your most recent ~60 matches (rolling window; cached under `cache/`) |
+| Replay files | the full **command log** for every player: each unit queued, building placed and technology researched, with timestamps | games the game client kept under `Documents\My Games\Age of Empires IV\network`, plus anything fetched from the official store with **Fetch replay** (`getReplayFiles` → signed download; retention there is spotty) |
+
+Replays record *orders*, not outcomes: a queued unit may be cancelled, a placed building may be destroyed or
+never finished. Kills, losses and APM therefore come from the official counters, never from the replay.
+
+### Tags
+
+Rules live in [tools/replays.py](tools/replays.py) and every tag carries a plain-language `why`. Thresholds are
+deliberately simple so they are easy to reason about and tune:
+
+- **Replay-based, per player** — Boomer (no military queued before 8:00), Cavalry raider (3+ cavalry before 6:00),
+  Archer opener (5+ ranged before 6:00), Infantry rush (5+ melee infantry before 6:00), Fast 2nd TC (before 10:00),
+  TC boom (3+ Town Centers), Turtle (4+ towers/outposts/keeps/gates before 12:00), Mono-comp (one unit ≥ 70 % of
+  military, min. 20 units), Siege heavy (≥ 15 % siege), Navy, Trader, Monk play.
+- **Game-relative, per player** — Fastest age-up, Most villagers, Biggest army (replay); Top fragger, Best K/D,
+  Highest APM, Most buildings, Fed (official counters).
+- **Per game** — with *friend* (one per configured friend on your team), Duo / 3-stack / 4-stack, Early end
+  (< 5 min), Long game (> 35 min).
+
+Known gaps: age-up detection relies on landmark classes, so civilizations with unusual age-up mechanics (Knights
+Templar, Golden Horde) show no age-up times; unit tiers (Veteran/Elite) are folded into their base unit; the
+official store rate-limits bursts of replay fetches (HTTP 429) — wait a minute and retry.
 
 ## Architecture
 

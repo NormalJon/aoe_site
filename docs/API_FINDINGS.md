@@ -75,8 +75,40 @@ telemetry; AoE4 World's `include_stats` is the other partial source.
 Caveats: map names are not resolved (join on `startgametime` with AoE4 World games), civilizations are
 numeric ids, leaderboard 0 semantics are unclear, and nothing here is guaranteed stable.
 
-## 4. Recommendation for a real site
+## 4. Replays — the only source of in-game detail (verified 7 Nov 2026)
 
+Neither API says *what* a player built or *when*. That lives in the replay, a complete command log.
+
+**Where replays come from**
+
+- The game client keeps them locally under `Documents\My Games\Age of Empires IV\`:
+  `network\M_<matchId>_<hash>.gz` (one replay and one post-game stats blob per match, same id; verify the
+  `AOE4_REP` signature to tell them apart), `playback\temp.rec` (last game), and `matchhistory\<id>\replay.rec`
+  plus `stats.rgs`. Only matches played on that machine are present (here: 51 replays since 18 Sep 2026).
+- The official store: `GET leaderboard/getReplayFiles?matchIDs=[<id>,…]&title=age4` returns `replayFiles[]`
+  with `profile_id`, `matchhistory_id`, `datatype` (0 = replay) and a **signed Azure blob URL** valid for a few
+  minutes. Download it plainly; the unsigned URLs in `getRecentMatchHistory.matchurls` answer 409
+  `PublicAccessNotPermitted`. Several ids per call are fine; bursts of calls get HTTP 429. Retention is uneven:
+  some perspectives 404, some older matches return `result.code 2 NOT_FOUND`. Try every listed perspective.
+  (Mechanism confirmed by reading the open-source AoE4-Replay-Launcher, which also keeps a legacy fallback on
+  `api.ageofempires.com/api/GameStats/AgeIV/GetMatchReplay`.)
+
+**What a replay contains** (format per aoe4world/replays-api docs; our reader is `tools/aoe4rec.py`)
+
+- Header with game build and date; player list (name, civ, team, id); then a tick stream (8 ticks/s).
+- Per command: type, issuing player, receivers, blueprint id. We decode train (0x03), research (0x10) and build
+  (0x7B, with map position). Blueprint ids resolve against `data.aoe4world.com` units/buildings/technologies
+  (99.3 % of train orders resolve). Unit classes (`cavalry`, `ranged`, `siege`, `villager`, `trade_cart`, …) and
+  landmark classes (`wonder_dark_age` = Feudal landmark, `wonder_feudal_age` = Castle, `wonder_castle_age` =
+  Imperial; Abbasid wings are technologies with an `age`) drive the analysis.
+- Not in a replay: positions of units, fights, kills, deaths, resources, idle time. Those are either in the
+  official counters (totals only) or in the undocumented `stats.rgs` (Relic Chunky `StatLoggingInternal`,
+  with per-player resource strings — not parsed).
+
+## 5. Recommendation for a real site
+
+0. **Personal analysis (built):** a local companion (`server.py` + `tools/replays.py`) that reads your replay folder,
+   fetches official replays and counters, and serves the merged view to the site. Replays never leave the machine.
 1. **Prototype / MVP:** browser → AoE4 World directly (as built). Add a tiny proxy for the official API.
 2. **Production:** a backend that ingests both sources on a schedule (`/games?updated_since`, dumps,
    official ladders and match history), stores them, and serves its own API. Benefits: independence from
