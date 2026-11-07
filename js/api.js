@@ -13,13 +13,13 @@ function fromSession(key) {
   try {
     const raw = sessionStorage.getItem(key);
     if (!raw) return null;
-    const { exp, data } = JSON.parse(raw);
+    const { exp, at, data } = JSON.parse(raw);
     if (Date.now() > exp) { sessionStorage.removeItem(key); return null; }
-    return data;
+    return { at, data };
   } catch { return null; }
 }
-function toSession(key, data, ttl) {
-  try { sessionStorage.setItem(key, JSON.stringify({ exp: Date.now() + ttl, data })); } catch { /* quota or private mode: ignore */ }
+function toSession(key, data, ttl, at) {
+  try { sessionStorage.setItem(key, JSON.stringify({ exp: Date.now() + ttl, at, data })); } catch { /* quota or private mode: ignore */ }
 }
 
 /** GET JSON with a two-level cache (memory, then sessionStorage). In-flight requests are shared. */
@@ -28,8 +28,9 @@ export async function getJSON(url, { ttl = TTL.medium, force = false } = {}) {
     const hit = mem.get(url);
     if (hit && hit.exp > Date.now()) return hit.promise;
     const s = fromSession(url);
-    if (s) { mem.set(url, { exp: Date.now() + ttl, promise: Promise.resolve(s) }); return s; }
+    if (s) { mem.set(url, { exp: Date.now() + ttl, at: s.at, promise: Promise.resolve(s.data) }); return s.data; }
   }
+  const at = Date.now();
   const promise = (async () => {
     const res = await fetch(url, { headers: { Accept: 'application/json' } });
     if (!res.ok) {
@@ -38,15 +39,34 @@ export async function getJSON(url, { ttl = TTL.medium, force = false } = {}) {
       throw new ApiError(msg, res.status, url);
     }
     const data = await res.json();
-    toSession(url, data, ttl);
+    toSession(url, data, ttl, at);
     return data;
   })();
-  mem.set(url, { exp: Date.now() + ttl, promise });
+  mem.set(url, { exp: Date.now() + ttl, at, promise });
   promise.catch(() => mem.delete(url));
   return promise;
 }
 
+/** When the cached copy of `url` was fetched (ms), or null. */
+export function cachedAt(url) {
+  const hit = mem.get(url);
+  if (hit?.at) return hit.at;
+  return fromSession(url)?.at ?? null;
+}
+
+/** Drop every cached response whose URL contains `substr` (memory + sessionStorage). */
+export function invalidate(substr) {
+  for (const k of [...mem.keys()]) if (k.includes(substr)) mem.delete(k);
+  try {
+    for (let i = sessionStorage.length - 1; i >= 0; i--) {
+      const k = sessionStorage.key(i);
+      if (k && k.includes(substr)) sessionStorage.removeItem(k);
+    }
+  } catch { /* ignore */ }
+}
+
 const u = (path, params) => `${API_BASE}${path}${qs(params)}`;
+export const urls = { player: id => u(`/players/${id}`) };
 
 export const api = {
   // ----- players -----

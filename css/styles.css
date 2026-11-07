@@ -393,6 +393,34 @@ table.compare td.a, table.compare td.b { text-align: center; font-variant-numeri
 .prose table.data { font-size: 13.5px; }
 .prose table.data code { white-space: nowrap; }
 
+/* ---------- profile overview (phase 1) ---------- */
+.linkish { background: none; border: 0; padding: 0; color: var(--link); cursor: pointer; font: inherit; font-size: inherit; }
+.linkish:hover { text-decoration: underline; }
+.freshness { white-space: nowrap; }
+.live-banner { display: flex; align-items: center; gap: 12px; padding: 10px 14px; margin-bottom: 12px; border-radius: var(--radius); border: 1px solid color-mix(in srgb, var(--critical) 40%, transparent); background: color-mix(in srgb, var(--critical) 8%, var(--surface)); flex-wrap: wrap; }
+.ribbon { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: -6px 0 14px; }
+.ribbon-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 7px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--ink-2); font-size: 12px; white-space: nowrap; }
+.ribbon-chip:hover { text-decoration: none; background: var(--surface-2); color: var(--ink); }
+.ribbon-chip.current { border-color: color-mix(in srgb, var(--accent) 50%, transparent); color: var(--ink); }
+.ribbon-chip .gem { width: 8px; height: 8px; transform: rotate(45deg); border-radius: 2px; background: var(--tier); flex: none; }
+.ribbon-chip strong { font-size: 12px; }
+table.data.compact th, table.data.compact td { padding: 6px 10px; font-size: 13px; }
+.session-row { display: flex; align-items: center; gap: 14px; padding: 8px 16px; background: var(--surface-2); border-top: 1px solid var(--border); font-size: 12.5px; color: var(--ink-2); flex-wrap: wrap; }
+.session-row .when { font-weight: 600; color: var(--ink); }
+.session-row + .game-row { border-top: 0; }
+.colbars { display: grid; gap: 3px; align-items: end; height: 84px; }
+.colbar { display: grid; grid-template-rows: 1fr auto; height: 100%; min-width: 0; cursor: default; border-radius: 4px; }
+.colbar:hover, .colbar:focus-visible { background: var(--surface-2); }
+.colbar .bar-wrap { display: flex; align-items: flex-end; height: 100%; padding: 2px 15% 0; }
+.colbar .bar { width: 100%; max-width: 24px; margin: 0 auto; border-radius: 4px 4px 0 0; min-height: 2px; }
+.colbar .lbl { font-size: 10px; color: var(--muted); text-align: center; height: 14px; white-space: nowrap; overflow: hidden; }
+.cal, .cal-months { display: grid; gap: 3px; }
+.cal-months { margin-bottom: 4px; font-size: 10px; }
+.cal-months span { overflow: hidden; white-space: nowrap; }
+.cal-day { font-size: 10px; line-height: 1; display: flex; align-items: center; padding-right: 4px; }
+.cal-cell { aspect-ratio: 1; border-radius: 2px; background: var(--surface-2); display: block; min-width: 0; }
+.cal-cell:hover, .cal-cell:focus-visible { outline: 2px solid var(--ink); outline-offset: -1px; }
+
 /* ---------- my games ---------- */
 .tags { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .tag { display: inline-flex; align-items: center; padding: 1px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; background: var(--surface-3); color: var(--ink-2); border: 1px solid var(--border); cursor: help; white-space: nowrap; }

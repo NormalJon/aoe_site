@@ -1,8 +1,9 @@
 import { el, fmt, setTitle, hrefTo, navigate, clear, append, groupBy, mean, winRate, countryName, median } from '../util.js';
-import { api, fetchPlayerGames, relic, relicAvailable } from '../api.js';
+import { api, fetchPlayerGames, relic, relicAvailable, cachedAt, invalidate, urls } from '../api.js';
+import { renderOverview, sessionize, sessionHeader, perspective } from './player_overview.js';
 import { avatarImg, countryFlag, socialLinks, rankBadge, statTile, modeTabs, civChip, dataTable, gameRow, subTabs, select, skeleton, errorBox, emptyState, notice, card, wrCell, divBar, streakEl, segmented, flattenTeams, playerLink, resultPill } from '../components.js';
 import { lineChart, sparkline } from '../charts.js';
-import { PROFILE_MODES, MODE, modeName, civName, kindName, parseRankLevel, RELIC_LEADERBOARD_NAMES, RELIC_MATCHTYPE_NAMES } from '../constants.js';
+import { PROFILE_MODES, MODE, LB, modeName, civName, kindName, parseRankLevel, RELIC_LEADERBOARD_NAMES, RELIC_MATCHTYPE_NAMES } from '../constants.js';
 import { fillAsync, ratingHistoryPoints, modesWithData, defaultMode, gamesFilterFor } from './_shared.js';
 
 export async function render(app, route) {
@@ -22,16 +23,29 @@ export async function render(app, route) {
   const tab = route.query.tab || 'matches';
   const link = (patch) => hrefTo(`/player/${id}`, { mode: modeKey, tab, ...patch });
 
+  /* ---------- side data: ladder size (percentile), the player's ladder entry (Twitch live), recent games (overview) ---------- */
+  const isPublicLb = !!LB[modeKey];
+  const lbTotalP = isPublicLb ? api.leaderboard(modeKey).catch(() => null) : Promise.resolve(null);
+  const lbEntryP = isPublicLb ? api.leaderboard(modeKey, { profile_id: id }).catch(() => null) : Promise.resolve(null);
+  const gamesP = fetchPlayerGames(id, {}, 4).catch(() => ({ games: [], total: 0 }));
+  const liveBanner = el('div');
+  const twitchPill = el('span');
+  const pctEl = el('span', { class: 'muted small' });
+  holder.append(liveBanner);
+
   /* ---------- header ---------- */
   const lastGame = Object.values(player.modes || {}).map(m => m.last_game_at).filter(Boolean).sort().at(-1);
+  const fetchedAt = cachedAt(urls.player(id));
+  const refresh = () => { invalidate(`/players/${id}`); clear(app); render(app, route); };
   holder.append(el('section', { class: 'card profile-head' },
     avatarImg(player, 'avatar-lg', 'medium'),
     el('div', { style: { minWidth: 0 } },
-      el('div', { class: 'title' }, el('h1', {}, player.name), countryFlag(player.country), el('span', { class: 'muted' }, countryName(player.country))),
+      el('div', { class: 'title' }, el('h1', {}, player.name), countryFlag(player.country), el('span', { class: 'muted' }, countryName(player.country)), twitchPill),
       el('div', { class: 'subline' },
         lastGame ? el('span', {}, 'Last game ', el('strong', { title: fmt.dateTime(lastGame) }, fmt.rel(lastGame))) : null,
         el('span', { class: 'muted' }, `Profile #${player.profile_id}`),
-        socialLinks(player.social, player.steam_id))),
+        socialLinks(player.social, player.steam_id),
+        el('span', { class: 'muted small freshness' }, fetchedAt ? `Updated ${fmt.rel(fetchedAt)}` : 'Updated just now', ' · ', el('button', { class: 'linkish', type: 'button', onClick: refresh }, 'Refresh')))),
     el('div', { class: 'actions' },
       el('a', { class: 'btn primary', href: hrefTo(`/compare/${id}`) }, 'Compare with…'),
       el('a', { class: 'btn', href: player.site_url?.replace('http://', 'https://') || `https://aoe4world.com/players/${id}`, target: '_blank', rel: 'noopener' }, 'AoE4 World ↗'))));
@@ -43,6 +57,22 @@ export async function render(app, route) {
     hiddenModes.length ? el('span', { class: 'muted' }, '· hidden ELO: ') : null,
     hiddenModes.length ? modeTabs(hiddenModes, modeKey, k => hrefTo(`/player/${id}`, { mode: k, tab })) : null));
 
+  /* ---------- career ribbon (season finishes for ranked modes) ---------- */
+  {
+    const seasons = [];
+    if (mode.season && (mode.games_count || mode.rating)) seasons.push({ ...mode, current: true });
+    for (const s of mode.previous_seasons || []) seasons.push(s);
+    if (seasons.length > 1) {
+      holder.append(el('div', { class: 'ribbon', 'aria-label': 'Season history' },
+        el('span', { class: 'muted small' }, 'Seasons'),
+        seasons.sort((a, b) => (b.season || 0) - (a.season || 0)).map(s => {
+          const r = parseRankLevel(s.rank_level);
+          return el('a', { class: `ribbon-chip ${s.current ? 'current' : ''}`, href: hrefTo(`/player/${id}`, { mode: modeKey, tab: 'seasons' }), title: `Season ${s.season}: ${r.label}, ${fmt.int(s.rating)} rating, ${fmt.int(s.wins_count)}W – ${fmt.int(s.losses_count)}L${s.rank ? `, #${fmt.int(s.rank)}` : ''}`, style: { '--tier': `var(--tier-${r.tier})` } },
+            el('span', { class: 'gem' }), el('span', {}, `S${s.season}`), el('strong', {}, r.short), el('span', { class: 'muted' }, fmt.int(s.rating)));
+        })));
+    }
+  }
+
   /* ---------- tiles ---------- */
   const pts = ratingHistoryPoints(mode);
   const rl = parseRankLevel(mode.rank_level);
@@ -50,7 +80,7 @@ export async function render(app, route) {
   const delta7 = since7d.length > 1 ? (since7d.at(-1).y - since7d[0].y) : null;
   holder.append(el('div', { class: 'tiles' },
     statTile({ label: `${modeName(modeKey)} rating`, value: fmt.int(mode.rating), delta: delta7, deltaGood: true, sub: delta7 !== null ? 'last 7 days' : (mode.rating ? 'no games in 7 days' : 'unrated'), spark: pts.length > 1 ? sparkline(pts.slice(-30)) : null }),
-    statTile({ label: 'Rank', value: mode.rank ? `#${fmt.int(mode.rank)}` : '—', sub: rl.label !== 'Unranked' ? el('span', {}, rankBadge(mode.rank_level, { sm: true })) : (MODE[modeKey]?.ranked ? 'Unranked this season' : 'Quick match has no tiers') }),
+    statTile({ label: 'Rank', value: mode.rank ? `#${fmt.int(mode.rank)}` : '—', sub: el('span', { style: { display: 'inline-flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } }, rl.label !== 'Unranked' ? rankBadge(mode.rank_level, { sm: true }) : (MODE[modeKey]?.ranked ? 'Unranked this season' : 'Quick match has no tiers'), pctEl) }),
     statTile({ label: 'Win rate', value: fmt.pct(mode.win_rate, 1), sub: `${fmt.int(mode.wins_count)} W – ${fmt.int(mode.losses_count)} L` }),
     statTile({ label: 'Streak', value: streakEl(mode.streak), sub: mode.streak > 0 ? 'wins in a row' : mode.streak < 0 ? 'losses in a row' : 'no streak' }),
     statTile({ label: 'Games', value: fmt.int(mode.games_count), unit: mode.season ? `season ${mode.season}` : 'total', sub: mode.drops_count ? `${mode.drops_count} drops` : null }),
@@ -80,6 +110,29 @@ export async function render(app, route) {
   function seriesSegFactory() { seriesSegEl = segmented(seriesOpts, seriesKey, v => { seriesKey = v; const n = seriesSegFactory(); seriesSegEl.replaceWith(n); drawChart(); }, { ariaLabel: 'Rating series' }); return seriesSegEl; }
   holder.append(card('Rating history', chartBox, { actions: el('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, seriesOpts.length > 1 ? seriesSegFactory() : null, rangeSegFactory()) }));
   drawChart();
+
+  /* ---------- overview widgets (filled when recent games arrive) ---------- */
+  const overview = el('div', { style: { marginTop: '16px' } }, skeleton(6));
+  holder.append(overview);
+  gamesP.then(({ games, total }) => {
+    if (!holder.isConnected) return;
+    const latest = games[0];
+    if (latest?.ongoing) {
+      const { opps } = perspective(latest, id);
+      liveBanner.append(el('div', { class: 'live-banner' }, resultPill('live'),
+        el('span', {}, el('strong', {}, 'In a game right now'), ` · ${latest.map} · ${kindName(latest.kind)}`, opps.length ? [' vs ', opps.map((o, i) => [i ? ', ' : '', el('a', { href: hrefTo(`/player/${o.profile_id}`) }, o.name)])] : null, ` · started ${fmt.rel(latest.started_at)}`),
+        el('a', { class: 'btn sm', href: '#/live', style: { marginLeft: 'auto' } }, 'Live feed')));
+    }
+    try { renderOverview(overview, { player, games, modeKey, total }); }
+    catch (e) { console.error(e); clear(overview); overview.append(errorBox(e)); }
+  });
+  Promise.all([lbTotalP, lbEntryP]).then(([lbTotal, lbEntry]) => {
+    if (!holder.isConnected) return;
+    const total = lbTotal?.total_count;
+    if (mode.rank && total) pctEl.textContent = `top ${(100 * mode.rank / total) < 1 ? (100 * mode.rank / total).toFixed(2) : (100 * mode.rank / total).toFixed(1)}% of ${fmt.int(total)}`;
+    const entry = lbEntry?.players?.find(p => String(p.profile_id) === String(id));
+    if (entry?.twitch_is_live) twitchPill.replaceWith(el('a', { class: 'pill live', href: entry.twitch_url || player.social?.twitch || '#', target: '_blank', rel: 'noopener', title: 'Streaming on Twitch now' }, 'Live on Twitch'));
+  });
 
   /* ---------- detail tabs ---------- */
   const tabsDef = [
@@ -117,7 +170,10 @@ function renderMatches(box, player, modeKey) {
     clear(list);
     const shown = games.filter(g => result === 'all' || flattenTeams(g).flat().find(p => p.profile_id === id)?.result === result);
     if (!shown.length) list.append(emptyState(games.length ? 'No games match this filter.' : 'No games found.'));
-    for (const g of shown) list.append(gameRow(g, { perspectiveId: id }));
+    for (const s of sessionize(shown)) {
+      list.append(sessionHeader(s, id));
+      for (const g of s.games) list.append(gameRow(g, { perspectiveId: id }));
+    }
     const w = games.filter(g => flattenTeams(g).flat().find(p => p.profile_id === id)?.result === 'win').length;
     summary.textContent = `Showing ${shown.length} of ${fmt.int(total)} games · loaded ${games.length} (${w} W – ${games.length - w} L)`;
     more.style.display = nextPage ? '' : 'none';
