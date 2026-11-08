@@ -93,6 +93,7 @@ Forge's calm density is a feature.
 | X3 | **Companion auto-analysis**: the local server watches the replay folder and analyses new games as they land, with a "new game analysed" toast | Blitz, AoE II Companion | local — have | M |
 | X4 | **Follow and notify**: alerts when a friend starts a game (live feed) — in-app first, push later | AoE II Companion, Stratz | `/games` polling — have; push needs a backend | M / L |
 | X5 | **Natural-language summaries** of a profile or a game generated from the structured data ("Analyze my last 10 games") | op.gg AI prompts | existing JSON + an LLM | L |
+| X6 | ~~**API console** (`#/api`) and `tools/api.py` for querying every source by hand~~ — shipped 8 Nov 2026 | Postman, Stratz GraphQL explorer | all four sources | S |
 
 ---
 

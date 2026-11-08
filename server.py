@@ -39,6 +39,7 @@ ALLOWED = {
     "leaderboard/getLeaderBoard2",
     "leaderboard/getPersonalStat",
     "leaderboard/getRecentMatchHistory",
+    "leaderboard/getReplayFiles",
 }
 USER_AGENT = "Forge-AoE4-prototype/0.1 (local development server)"
 CACHE_TTL = 60.0
@@ -86,6 +87,8 @@ class Handler(SimpleHTTPRequestHandler):
                 body = json.loads(self.rfile.read(n) or b"{}") if n else {}
                 as_pid = int(q["as"]) if q.get("as", "").isdigit() else None
                 return self.send_json(200, tournament.action(replays.load_config(), parts[2], body, as_pid))
+            except KeyError as e:
+                return self.send_json(400, {"error": f"missing body field {e}"})
             except ValueError as e:
                 return self.send_json(400, {"error": str(e)})
             except urllib.error.HTTPError as e:

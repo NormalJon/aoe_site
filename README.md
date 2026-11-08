@@ -47,6 +47,7 @@ controls; `/cache/` and `forge.local.json` are never served.
 | `#/game/:id?p=:profile` | Game summary (any player) | Opened from **Summary ›** on any match row. Key insights (rule-based sentences about the viewed player), team scoreboards, **minute-aligned build orders for every player side by side** with unit/building/technology icon strips and a resources-spent-per-minute line per player, timelines (villagers, military, spend, buildings) with age-up and TC markers, unit matrix, team production, tag explanations. Replay fetched from the official store on demand |
 | `#/tournament` | Forge Cup (prototype) | Monthly Clash-style 1v1 cup: connect a profile, pick one of six weekend start times, declare a 3–5 civ pool; lock in 60–10 min before the slot; locked-in players are sorted by rating into brackets of 8; per series a mini draft (alternating map bans from a 7-map pool, one civ ban from the opponent's pool, blind civ picks revealed together, a civ you win with is locked); best-of-3 with reported results and verification against AoE4 World match history. Demo controls add real ladder players near your rating as entrants and fast-forward the clock |
 | `#/data` | Data & sources | Live reachability check, full endpoint inventory, terms, and the official-API situation |
+| `#/api` | API console | Query every source from the browser: AoE4 World, static game data, the official World's Edge API (through the companion proxy) and the companion itself. Endpoint catalogue with parameter hints and player-id lookup, raw-path mode, POST with a JSON body for Cup actions, response as a collapsible tree / raw JSON / sortable table, path and JavaScript-expression drilling, copy as URL / curl / Python / CLI, download, history and saved requests (this browser only). `tools/api.py` is the terminal twin, with a `shell` mode |
 | `#/mygames` | My games (local companion) | Every game on your record with official counters and replay analysis: filter by mode, friend, tag, result, data availability; rows open the game summary from your perspective |
 
 Profiles also carry replay-derived **Playstyle** (identity tags with frequencies, medians for villagers by 10:00,
@@ -133,7 +134,8 @@ js/util.js            DOM builder (text-safe), formatting, routing helpers, colo
 js/components.js      player chips, flags, rank badges, tables, pagination, game rows, search box, tooltip
 js/charts.js          SVG line chart (crosshair tooltip, direct end labels, keyboard), sparkline, heatmap
 js/pages/*.js         one module per route
-server.py             static server + World's Edge proxy (allow-list, 60 s cache)
+server.py             static server + World's Edge proxy (allow-list, 60 s cache) + companion endpoints
+tools/api.py          terminal client for every source (`py -3 tools/api.py aoe4world /players/ID`, `shell` for a REPL)
 assets/flags/*.png    civilization flags
 docs/API_FINDINGS.md  research notes on every data source
 ```

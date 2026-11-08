@@ -8,7 +8,8 @@ const code = s => el('code', {}, s);
 
 export async function render(app) {
   setTitle('Data & sources');
-  app.append(pageHead('Data & sources', 'Where the numbers come from, which APIs exist, and what each one can and cannot do.'));
+  app.append(pageHead('Data & sources', 'Where the numbers come from, which APIs exist, and what each one can and cannot do.',
+    el('a', { class: 'btn', href: '#/api' }, 'Open the API console →')));
 
   const status = el('div', { class: 'tiles', style: { marginBottom: '20px' } });
   app.append(status);

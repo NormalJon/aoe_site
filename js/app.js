@@ -13,6 +13,7 @@ import * as mygames from './pages/mygames.js';
 import * as game from './pages/game.js';
 import * as scout from './pages/scout.js';
 import * as tournament from './pages/tournament.js';
+import * as apiConsole from './pages/api.js';
 
 const routes = [
   { test: p => p.length === 0, page: home, nav: null },
@@ -26,6 +27,7 @@ const routes = [
   { test: p => p[0] === 'maps', page: maps, nav: 'maps' },
   { test: p => p[0] === 'live', page: live, nav: 'live' },
   { test: p => p[0] === 'data', page: data, nav: 'data' },
+  { test: p => p[0] === 'api', page: apiConsole, nav: 'api' },
   { test: p => p[0] === 'mygames', page: mygames, nav: 'mygames' },
 ];
 const notFound = { page: { render: app => { app.append(notice('Page not found. ', el('a', { href: '#/' }, 'Go home'))); } }, nav: null };
