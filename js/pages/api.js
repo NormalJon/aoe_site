@@ -299,7 +299,7 @@ export async function render(app, route) {
     respBox.append(status);
     if (resp.upstream && resp.upstream !== resp.url) respBox.append(el('div', { class: 'api-url muted', style: { marginBottom: '10px' } }, 'upstream ', resp.upstream));
     if (resp.error) respBox.append(notice(el('strong', {}, 'Request failed. '), resp.error, ' ', SOURCES[st.src].companion && !cfg ? el('span', {}, ...companionHint()) : null));
-    if (resp.companionMissing) respBox.append(notice(el('strong', {}, 'This source needs the companion. '), ...companionHint()));
+    if (resp.companionMissing) { respBox.append(notice(el('strong', {}, 'This source needs the companion. '), ...companionHint())); return; }
     if (resp.data === undefined) { if (resp.text) respBox.append(el('pre', { class: 'json-raw' }, resp.text.slice(0, 20000))); return; }
 
     // query row
