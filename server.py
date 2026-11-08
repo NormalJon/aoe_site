@@ -27,7 +27,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get("PORT", "8000"))
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
-from tools import replays  # noqa: E402
+from tools import replays, tournament  # noqa: E402
 
 RELIC_BASE = "https://aoe-api.worldsedgelink.com/community/"
 ALLOWED = {
@@ -68,6 +68,25 @@ class Handler(SimpleHTTPRequestHandler):
             return self.local()
         return super().do_GET()
 
+    def do_POST(self):
+        parsed = urllib.parse.urlsplit(self.path)
+        parts = [p for p in parsed.path.split("/") if p]
+        q = dict(urllib.parse.parse_qsl(parsed.query))
+        if len(parts) == 3 and parts[:2] == ["local", "tournament"]:
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+                as_pid = int(q["as"]) if q.get("as", "").isdigit() else None
+                return self.send_json(200, tournament.action(replays.load_config(), parts[2], body, as_pid))
+            except ValueError as e:
+                return self.send_json(400, {"error": str(e)})
+            except urllib.error.HTTPError as e:
+                return self.send_json(502, {"error": f"upstream {e.code}: {e.reason}"})
+            except Exception as e:  # noqa: BLE001
+                traceback.print_exc()
+                return self.send_json(500, {"error": str(e)})
+        return self.send_json(404, {"error": "unknown endpoint"})
+
     # ------------------------------------------------------------------ local companion
     def local(self):
         parsed = urllib.parse.urlsplit(self.path)
@@ -82,6 +101,9 @@ class Handler(SimpleHTTPRequestHandler):
                                             "local_replays": len(local), "config_error": cfg.get("config_error"),
                                             "configured": bool(cfg.get("me")), "companion": True})
             # --- endpoints that work for any player (no 'me' needed) ---
+            if parts == ["tournament", "state"]:
+                as_pid = int(q["as"]) if q.get("as", "").isdigit() else None
+                return self.send_json(200, tournament.get_state(cfg, as_pid))
             if len(parts) == 2 and parts[0] == "game" and parts[1].isdigit():
                 prof = q.get("profile")
                 if not (prof and prof.isdigit()) and not cfg.get("me"):

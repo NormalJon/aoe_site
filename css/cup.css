@@ -1,0 +1,80 @@
+/* ---------- Forge Cup (tournament) ---------- */
+.cup-steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.cup-steps li { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); font-size: 13.5px; }
+.cup-steps li .n { flex: none; width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--surface-3); color: var(--ink-2); font-weight: 700; font-size: 13px; }
+.cup-steps li.now { border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+.cup-steps li.now .n { background: var(--accent); color: var(--accent-ink); }
+.cup-steps li.past { opacity: .7; }
+.cup-steps li.past .n { background: color-mix(in srgb, var(--good) 30%, var(--surface-3)); }
+.cup-ident .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.cup-ident .avatar { width: 28px; height: 28px; border-radius: 7px; background: var(--surface-3); }
+.slot-list { display: grid; gap: 6px; }
+.slot { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); font-size: 13.5px; cursor: pointer; }
+.slot.on { border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: color-mix(in srgb, var(--accent) 8%, var(--surface-2)); }
+.slot.off { opacity: .6; cursor: default; }
+.slot .right { text-align: right; }
+.phase { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 650; background: var(--surface-3); color: var(--ink-2); white-space: nowrap; }
+.phase.open { color: var(--good-text); } .phase.hot { color: var(--accent); } .phase.live { color: var(--critical-text); } .phase.done { color: var(--muted); }
+.civ-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; }
+.civ-pick, .civ-chip, .map-chip { display: inline-flex; align-items: center; gap: 7px; padding: 6px 9px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--ink-2); font-size: 12.5px; cursor: pointer; text-align: left; min-width: 0; }
+.civ-pick img, .civ-chip img { width: 24px; height: 13px; border-radius: 2px; object-fit: cover; box-shadow: 0 0 0 1px var(--border); flex: none; }
+.civ-pick span, .civ-chip span, .map-chip .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.civ-pick:hover:not([disabled]), .civ-chip:hover:not([disabled]), .map-chip:hover:not([disabled]) { background: var(--surface-3); color: var(--ink); }
+.civ-pick.on { color: var(--ink); border-color: color-mix(in srgb, var(--accent) 70%, transparent); background: color-mix(in srgb, var(--accent) 12%, var(--surface-2)); font-weight: 600; }
+.civ-pick[disabled], .civ-chip[disabled], .map-chip[disabled] { cursor: default; }
+.cup-status { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--border); font-size: 13.5px; }
+.sched { display: grid; gap: 6px; }
+.sched-row { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13.5px; }
+.sched-row:last-of-type { border-bottom: 0; }
+.sched-row .right { text-align: right; white-space: nowrap; }
+.cup-log { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.bracket-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.bracket-card { text-align: left; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--ink); cursor: pointer; display: grid; gap: 4px; }
+.bracket-card .top { display: flex; justify-content: space-between; gap: 8px; }
+.bracket-card .names { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bracket-card.on { border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+.bracket-card.mine { background: color-mix(in srgb, var(--accent) 6%, var(--surface)); }
+.bracket-wrap { overflow-x: auto; }
+.bracket { display: flex; gap: 22px; align-items: stretch; min-width: max-content; }
+.bracket .round { display: flex; flex-direction: column; gap: 10px; min-width: 250px; }
+.bracket .round .round-name { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+.bracket .round > .match-box { flex: 1; }
+.bracket .round:nth-child(1) > .match-box { flex: 0 0 auto; }
+.match-box { display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--ink); text-align: left; cursor: pointer; width: 100%; font: inherit; }
+.match-box:hover { background: var(--surface-3); }
+.match-box.on { border-color: color-mix(in srgb, var(--accent) 70%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); }
+.match-box.mine { background: color-mix(in srgb, var(--accent) 8%, var(--surface-2)); }
+.match-box.bye { opacity: .7; }
+.match-box .status { padding: 2px 6px 0; }
+.match-box.champ { background: color-mix(in srgb, var(--accent) 14%, var(--surface-2)); border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+.side { display: flex; align-items: center; gap: 7px; padding: 4px 6px; border-radius: 6px; font-size: 13.5px; min-width: 0; }
+.side .seed { width: 16px; color: var(--muted); font-size: 11.5px; text-align: right; flex: none; }
+.side .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.side .r { font-size: 12px; }
+.side .score { font-weight: 700; min-width: 16px; text-align: right; }
+.side.won { background: color-mix(in srgb, var(--good) 14%, transparent); }
+.side.won .nm { color: var(--ink); }
+.side.me .nm { color: var(--accent); }
+.side.tbd { opacity: .6; }
+.series-head { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items: center; }
+.series-head .p { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.series-head .p.right { justify-content: flex-end; text-align: right; }
+.series-head .avatar { width: 40px; height: 40px; border-radius: 10px; background: var(--surface-3); flex: none; }
+.series-head .score-big { font-size: 30px; font-weight: 700; padding: 0 10px; }
+.draft-steps { display: flex; flex-wrap: wrap; gap: 4px; }
+.dstep { padding: 2px 8px; border-radius: 999px; font-size: 11.5px; background: var(--surface-2); color: var(--muted); border: 1px solid var(--border); }
+.dstep.done { text-decoration: line-through; opacity: .6; }
+.dstep.now { color: var(--ink); border-color: color-mix(in srgb, var(--accent) 70%, transparent); background: color-mix(in srgb, var(--accent) 12%, var(--surface-2)); font-weight: 650; }
+.map-pool, .civ-pool { display: flex; flex-wrap: wrap; gap: 6px; }
+.map-chip { flex-direction: column; align-items: flex-start; gap: 2px; min-width: 120px; }
+.map-chip .tagline, .civ-chip .tagline { font-size: 10.5px; color: var(--muted); }
+.map-chip.banned, .civ-chip.banned { opacity: .5; text-decoration: line-through; }
+.map-chip.picked, .civ-chip.picked { border-color: color-mix(in srgb, var(--s1) 70%, transparent); background: color-mix(in srgb, var(--s1) 12%, var(--surface-2)); color: var(--ink); }
+.civ-chip.locked { border-style: dashed; opacity: .6; }
+.civ-chip:not([disabled]), .map-chip:not([disabled]) { border-color: color-mix(in srgb, var(--accent) 50%, transparent); color: var(--ink); }
+.games-list { display: grid; gap: 6px; }
+.game-line { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); font-size: 13.5px; flex-wrap: wrap; }
+.game-line .spacer { flex: 1; }
+.game-line.pending { border-style: dashed; }
+@media (max-width: 1000px) { .cup-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .cup-steps { grid-template-columns: 1fr; } .series-head { grid-template-columns: 1fr; } .series-head .p.right { justify-content: flex-start; text-align: left; flex-direction: row-reverse; } }

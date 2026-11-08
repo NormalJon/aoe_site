@@ -12,12 +12,14 @@ import * as data from './pages/data.js';
 import * as mygames from './pages/mygames.js';
 import * as game from './pages/game.js';
 import * as scout from './pages/scout.js';
+import * as tournament from './pages/tournament.js';
 
 const routes = [
   { test: p => p.length === 0, page: home, nav: null },
   { test: p => p[0] === 'player' && /^\d+$/.test(p[1] || ''), page: player, nav: null },
   { test: p => p[0] === 'game' && /^\d+$/.test(p[1] || ''), page: game, nav: null },
   { test: p => p[0] === 'scout', page: scout, nav: 'scout' },
+  { test: p => p[0] === 'tournament', page: tournament, nav: 'tournament' },
   { test: p => p[0] === 'compare', page: compare, nav: 'compare' },
   { test: p => p[0] === 'leaderboard', page: leaderboard, nav: 'leaderboard' },
   { test: p => p[0] === 'civs', page: civs, nav: 'civs' },

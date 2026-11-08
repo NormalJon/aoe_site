@@ -77,6 +77,13 @@ Forge's calm density is a feature.
 | L3 | **Civ pages**: one page per civilization with win rate by bracket and map, best matchups, top players on that civ, your own record with it | Blitz tier lists / champion pages, aoe2insights civ pages | stats endpoints + leaderboard — have | M |
 | L4 | **Patch compare**: civ win-rate delta between patches ("26.21 → 26.22" style arrows) | Blitz tier list deltas | stats `patch` param — have | S |
 
+### Community play
+
+| # | Idea | Inspired by | Data | Effort |
+|---|---|---|---|---|
+| T1 | **Forge Cup** — monthly Clash-style 1v1 cup: weekend slots, lock-in window, rating-grouped brackets of 8, mini draft (map bans, one civ ban from a declared 3–5 civ pool, blind picks, winner's civ lock), Bo3, results verified against match history. **Prototype shipped 8 Nov 2026** (`#/tournament`, `tools/tournament.py`); production needs Steam sign-in, no-show handling, a hosted store and notifications | League of Legends Clash | profiles + games API — have | M (prototype) / L (hosted) |
+| T2 | **Team cup (2v2)**: register as a duo, pools and bans per team, same slot/lock-in loop | Clash (team-based) | same | M |
+
 ### Platform
 
 | # | Idea | Inspired by | Data | Effort |

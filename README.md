@@ -34,6 +34,7 @@ when set; the Claude desktop launch config in `.claude/launch.json` uses it.
 | `#/live` | Live | In-progress games (auto-refresh), busiest mode/server, just-finished results; **Scout ›** on every live game |
 | `#/scout` | Scout | Paste two teams (up to 4 names each) or open a live lobby: ratings, rank, form, streak, top civs with pick/win rates, team averages, Elo-based "favoured" call, and each player's playstyle tags from replays (companion) |
 | `#/game/:id?p=:profile` | Game summary (any player) | Opened from **Summary ›** on any match row. Key insights (rule-based sentences about the viewed player), team scoreboards, **minute-aligned build orders for every player side by side** with unit/building/technology icon strips and a resources-spent-per-minute line per player, timelines (villagers, military, spend, buildings) with age-up and TC markers, unit matrix, team production, tag explanations. Replay fetched from the official store on demand |
+| `#/tournament` | Forge Cup (prototype) | Monthly Clash-style 1v1 cup: connect a profile, pick one of six weekend start times, declare a 3–5 civ pool; lock in 60–10 min before the slot; locked-in players are sorted by rating into brackets of 8; per series a mini draft (alternating map bans from a 7-map pool, one civ ban from the opponent's pool, blind civ picks revealed together, a civ you win with is locked); best-of-3 with reported results and verification against AoE4 World match history. Demo controls add real ladder players near your rating as entrants and fast-forward the clock |
 | `#/data` | Data & sources | Live reachability check, full endpoint inventory, terms, and the official-API situation |
 | `#/mygames` | My games (local companion) | Every game on your record with official counters and replay analysis: filter by mode, friend, tag, result, data availability; rows open the game summary from your perspective |
 
@@ -85,6 +86,29 @@ deliberately simple so they are easy to reason about and tune:
 Known gaps: age-up detection relies on landmark classes, so civilizations with unusual age-up mechanics (Knights
 Templar, Golden Horde) show no age-up times; unit tiers (Veteran/Elite) are folded into their base unit; the
 official store rate-limits bursts of replay fetches (HTTP 429) — wait a minute and retry.
+
+## Forge Cup — the tournament prototype
+
+`#/tournament` mirrors the League of Legends Clash loop for AoE IV 1v1. Everything is implemented in
+[tools/tournament.py](tools/tournament.py) and stored in `cache/tournament.json` by the companion:
+
+- **Schedule.** One event a month on the third weekend, six start slots (UTC, shown in local time). Registration
+  closes 24 h before a slot; the lock-in window runs from 60 to 10 minutes before; brackets form at lock-in close.
+- **Entry.** Connect a profile (prototype: claimed id; production: Steam sign-in), pick a slot, declare 3–5 civs.
+  The rating on the chosen ladder is fetched from AoE4 World and decides the bracket.
+- **Brackets.** Locked-in players of a slot sorted by rating and cut into groups of 8 (seeds 1–8, byes fill a
+  short group, a tail group under 4 merges into the previous one, 9–16 players make a 16-bracket).
+- **Draft.** Map bans hi/lo/hi/lo from a 7-map pool taken from the current ranked rotation; lower seed picks the
+  game-1 map, higher seed game 2, remainder decides. Each player bans one civ from the opponent's declared pool;
+  every game both pick blind from their remaining pool; a civ you win a game with is locked for the series, so a
+  pool of three always leaves a legal pick.
+- **Results.** Best-of-3; players report, and *Verify from match history* records finished AoE4 World games
+  between the two players since the scheduled time.
+- **Demo controls.** Add 7 real ladder profiles near your rating as entrants (with their actual most-played civs
+  as pools), fast-forward the clock to lock-in / bracket reveal / live, act for both players in a series, reset.
+
+Missing for a real launch: Steam sign-in, no-show timers and forfeits, anti-smurf checks, a lobby/host handshake,
+prizes and a hosted store with notifications.
 
 ## Architecture
 
