@@ -842,7 +842,27 @@ def _median(xs):
     return xs[m] if len(xs) % 2 else (xs[m - 1] + xs[m]) / 2
 
 
-def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False):
+MIL_BUILDINGS = ('barracks', 'archery range', 'stable', 'siege workshop', 'dock', 'military school', 'mercenary', 'camel', 'horse ranch')
+
+
+def _summarize(rp, g, me, a, status):
+    """Per-game summary of one player's replay data kept in the profile store (small, serialisable)."""
+    dur = g.get('duration') or a['duration']
+    tags = player_tags(rp, dur, a['players'])
+    opening = sorted([{'t': round(x['time'], 1), 'k': 'build', 'name': x['name']} for x in rp.get('build_order') or []] +
+                     [{'t': round(x['time'], 1), 'k': 'research', 'name': x['name']} for x in rp.get('research') or []], key=lambda x: x['t'])[:18]
+    early = Counter(x['name'] for x in rp.get('build_order') or [] if x['time'] < 300)
+    first_mil_b = next((x for x in rp.get('build_order') or [] if any(w in x['name'].lower() for w in MIL_BUILDINGS)), None)
+    s = {k: rp.get(k) for k in PROFILE_FIELDS}
+    s.update({'game_id': g['game_id'], 'started_at': g['started_at'], 'kind': g['kind'], 'map': g['map'], 'duration': dur,
+              'civ': me.get('civilization'), 'result': me.get('result'), 'rating_diff': me.get('rating_diff'), 'source': status,
+              'tags': [t['tag'] for t in tags], 'tag_labels': {t['tag']: t['label'] for t in tags},
+              'opening': opening, 'early_buildings': dict(early), 'landmarks': rp.get('landmarks') or [],
+              'first_military_building': {'time': first_mil_b['time'], 'name': first_mil_b['name']} if first_mil_b else None})
+    return s
+
+
+def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False, civ=None):
     """Aggregate replay-derived tags, medians and records over a player's recent games.
     Fetches replays from the official store as needed, a few per call (time budget), and caches everything.
     Returns a partial result with `pending` > 0 when more games could still be analysed."""
@@ -854,14 +874,30 @@ def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False):
             state = json.loads(store.read_text(encoding='utf-8'))
         except Exception:  # noqa: BLE001
             pass
-    games = player_games(pid, pages=2, refresh=refresh)
-    finished = [g for g in games if not g.get('ongoing') and (g.get('duration') or 0) >= 480]
+    games = player_games(pid, pages=4 if civ else 2, refresh=refresh)   # a specific civ may be rare: look further back
+    def me_in(g):
+        return next((p for t in g.get('teams') or [] for x in t for p in [x.get('player', x)] if p['profile_id'] == pid), None)
+    finished = [g for g in games if not g.get('ongoing') and (g.get('duration') or 0) >= 480 and (not civ or (me_in(g) or {}).get('civilization') == civ)]
     local = local_replays(cfg)
+    matches_civ = lambda s: not civ or s.get('civ') == civ  # noqa: E731
+    # stored summaries written before newer fields existed are rebuilt from the (cached) analysis
+    by_id = {str(g['game_id']): g for g in games}
+    for gid, s in list(state['analysed'].items()):
+        if 'opening' in s or gid not in by_id or not local.get(int(gid)):
+            continue
+        try:
+            a = analyze_replay(local[int(gid)])
+            me_ = me_in(by_id[gid])
+            rp = next((p for p in a['players'] if me_ and p['name'] == me_['name']), None)
+            if rp:
+                state['analysed'][gid] = _summarize(rp, by_id[gid], me_, a, s.get('source', 'cached'))
+        except Exception:  # noqa: BLE001
+            pass
     deadline = time.time() + budget
     rate_limited = False
     for g in finished:
         gid = str(g['game_id'])
-        if len(state['analysed']) >= want:
+        if sum(1 for s in state['analysed'].values() if matches_civ(s)) >= want:
             break
         if gid in state['analysed']:
             continue
@@ -894,15 +930,10 @@ def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False):
         if rp is None:
             state['missing'][gid] = {'status': 'name mismatch', 'at': time.time()}
             continue
-        summary = {k: rp.get(k) for k in PROFILE_FIELDS}
-        summary.update({'game_id': g['game_id'], 'started_at': g['started_at'], 'kind': g['kind'], 'map': g['map'], 'duration': g.get('duration') or a['duration'],
-                        'civ': me.get('civilization'), 'result': me.get('result'), 'rating_diff': me.get('rating_diff'), 'source': status,
-                        'tags': [t['tag'] for t in player_tags(rp, g.get('duration') or a['duration'], a['players'])],
-                        'tag_labels': {t['tag']: t['label'] for t in player_tags(rp, g.get('duration') or a['duration'], a['players'])}})
-        state['analysed'][gid] = summary
+        state['analysed'][gid] = _summarize(rp, g, me, a, status)
     store.write_text(json.dumps(state), encoding='utf-8')
 
-    rows = sorted(state['analysed'].values(), key=lambda s: s['started_at'], reverse=True)
+    rows = sorted([s for s in state['analysed'].values() if matches_civ(s)], key=lambda s: s['started_at'], reverse=True)
     n = len(rows)
     tag_counts, labels = Counter(), {}
     for s in rows:
@@ -977,10 +1008,35 @@ def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False):
     }
     remaining = [g for g in finished if str(g['game_id']) not in state['analysed'] and (state['missing'].get(str(g['game_id'])) or {}).get('status') != 'not_found']
     pending = min(max(0, want - n), len(remaining))
+    # scouting aggregates: what this player builds (optionally as one civ)
+    unit_tot = Counter()
+    for s in rows:
+        unit_tot.update(s.get('military_by_unit') or {})
+    mil_all = sum(unit_tot.values()) or 1
+    unit_mix = [{'unit': u, 'count': c, 'pct': round(100 * c / mil_all)} for u, c in unit_tot.most_common(8)]
+    early_tot = Counter()
+    for s in rows:
+        early_tot.update(s.get('early_buildings') or {})
+    early_buildings = [{'name': b, 'per_game': round(c / n, 1), 'games': sum(1 for s in rows if b in (s.get('early_buildings') or {}))} for b, c in early_tot.most_common(10)] if n else []
+    feudal_via = Counter(next((a_['via'] for a_ in s.get('ages') or [] if a_['age'] == 2), None) for s in rows)
+    castle_via = Counter(next((a_['via'] for a_ in s.get('ages') or [] if a_['age'] == 3), None) for s in rows)
+    first_units = Counter((s.get('first_military') or {}).get('name') for s in rows)
+    first_bld = Counter((s.get('first_military_building') or {}).get('name') for s in rows)
+    openings = {
+        'feudal_landmark': [{'name': k, 'games': v} for k, v in feudal_via.most_common() if k],
+        'castle_landmark': [{'name': k, 'games': v} for k, v in castle_via.most_common() if k],
+        'first_military_unit': [{'name': k, 'games': v} for k, v in first_units.most_common() if k],
+        'first_military_time': _median([(s.get('first_military') or {}).get('time') for s in rows]),
+        'first_military_building': [{'name': k, 'games': v} for k, v in first_bld.most_common() if k],
+        'first_military_building_time': _median([(s.get('first_military_building') or {}).get('time') for s in rows]),
+        'second_tc_rate': round(100 * sum(1 for s in rows if s.get('town_centers')) / n) if n else None,
+        'second_tc_time': _median([(s.get('town_centers') or [None])[0] for s in rows]),
+    }
+    wins = sum(1 for s in rows if s.get('result') == 'win')
     return {
-        'profile_id': pid, 'analysed': n, 'candidates': len(finished), 'missing': len(state['missing']), 'want': want, 'pending': pending, 'rate_limited': rate_limited,
-        'tags': tags, 'medians': medians, 'composition': composition, 'records': records, 'api_records': api_records,
-        'games': [{k: s.get(k) for k in ('game_id', 'started_at', 'kind', 'map', 'duration', 'civ', 'result', 'rating_diff', 'villagers_by_10', 'military_by_8', 'apm_replay', 'tags', 'source')} | {'feudal': _age_time(s, 2), 'castle': _age_time(s, 3), 'tcs': len(s['town_centers'] or []) + 1} for s in rows],
+        'profile_id': pid, 'civ': civ, 'analysed': n, 'wins': wins, 'losses': sum(1 for s in rows if s.get('result') == 'loss'), 'candidates': len(finished), 'games_scanned': len(games), 'missing': len(state['missing']), 'want': want, 'pending': pending, 'rate_limited': rate_limited,
+        'tags': tags, 'medians': medians, 'composition': composition, 'unit_mix': unit_mix, 'early_buildings': early_buildings, 'openings': openings, 'records': records, 'api_records': api_records,
+        'games': [{k: s.get(k) for k in ('game_id', 'started_at', 'kind', 'map', 'duration', 'civ', 'result', 'rating_diff', 'villagers_by_10', 'military_by_8', 'apm_replay', 'tags', 'source', 'opening', 'first_military', 'military_by_unit')} | {'feudal': _age_time(s, 2), 'castle': _age_time(s, 3), 'tcs': len(s['town_centers'] or []) + 1} for s in rows],
         'updated': time.time(),
     }
 
