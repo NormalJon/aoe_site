@@ -119,9 +119,12 @@ export async function render(app, route) {
     const latest = games[0];
     if (latest?.ongoing) {
       const { opps } = perspective(latest, id);
+      const teams = flattenTeams(latest);
       liveBanner.append(el('div', { class: 'live-banner' }, resultPill('live'),
         el('span', {}, el('strong', {}, 'In a game right now'), ` · ${latest.map} · ${kindName(latest.kind)}`, opps.length ? [' vs ', opps.map((o, i) => [i ? ', ' : '', el('a', { href: hrefTo(`/player/${o.profile_id}`) }, o.name)])] : null, ` · started ${fmt.rel(latest.started_at)}`),
-        el('a', { class: 'btn sm', href: '#/live', style: { marginLeft: 'auto' } }, 'Live feed')));
+        el('span', { style: { marginLeft: 'auto', display: 'inline-flex', gap: '8px' } },
+          teams.length === 2 ? el('a', { class: 'btn sm primary', href: hrefTo('/scout', { mode: gamesFilterFor(modeKey), a: teams[0].map(p => p.profile_id).join(','), b: teams[1].map(p => p.profile_id).join(',') }) }, 'Scout this lobby') : null,
+          el('a', { class: 'btn sm', href: '#/live' }, 'Live feed'))));
     }
     try { renderOverview(overview, { player, games, modeKey, total }); }
     catch (e) { console.error(e); clear(overview); overview.append(errorBox(e)); }

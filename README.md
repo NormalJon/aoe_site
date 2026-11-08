@@ -31,9 +31,19 @@ when set; the Claude desktop launch config in `.claude/launch.json` uses it.
 | `#/leaderboard/:key` | Leaderboards | Six ladders, name filter, country filter, jump-to-page, pick-two-to-compare |
 | `#/civs` | Civilizations | Win/pick rates by ladder, rank bracket and rating; per-civ detail with matchups; 23×23 matchup heatmap; team compositions for QM 2v2/3v3 |
 | `#/maps` · `#/maps/:id` | Maps | Map pool share, lengths, best civ per map; per-map civ win rates |
-| `#/live` | Live | In-progress games (auto-refresh), busiest mode/server, just-finished results |
+| `#/live` | Live | In-progress games (auto-refresh), busiest mode/server, just-finished results; **Scout ›** on every live game |
+| `#/scout` | Scout | Paste two teams (up to 4 names each) or open a live lobby: ratings, rank, form, streak, top civs with pick/win rates, team averages, Elo-based "favoured" call, and each player's playstyle tags from replays (companion) |
+| `#/game/:id?p=:profile` | Game summary (any player) | Opened from **Summary ›** on any match row. Key insights (rule-based sentences about the viewed player), team scoreboards, **minute-aligned build orders for every player side by side** with unit/building/technology icon strips and a resources-spent-per-minute line per player, timelines (villagers, military, spend, buildings) with age-up and TC markers, unit matrix, team production, tag explanations. Replay fetched from the official store on demand |
 | `#/data` | Data & sources | Live reachability check, full endpoint inventory, terms, and the official-API situation |
-| `#/mygames` · `#/mygames/:id` | My games (local companion) | Every game on your record with official counters and replay analysis: filter by mode, friend, tag, result; per-game team scoreboards, a unit-by-player matrix, army production over time, build orders and rule-based tags with explanations |
+| `#/mygames` | My games (local companion) | Every game on your record with official counters and replay analysis: filter by mode, friend, tag, result, data availability; rows open the game summary from your perspective |
+
+Profiles also carry replay-derived **Playstyle** (identity tags with frequencies, medians for villagers by 10:00,
+age-up times, early military, Town Centers, military spend share, APM, army composition) and **Records**
+(fastest Feudal/Castle/Imperial, earliest 2nd TC, most villagers, biggest army, highest APM, longest game, longest
+win streak, biggest upset) cards, and Compare has a **skill radar** (Economy, Tempo, Aggression, Army, Expansion,
+Macro on fixed ladder-wide scales). These work for *any* player: the companion pulls that player's recent replays
+from the official store a few at a time (`/local/profile/:id?n=10`), so the first visit shows a partial result
+with an "Analyse more" button.
 
 Dark and light themes (toggle in the header, follows the OS by default). Responsive down to phone width.
 
@@ -114,10 +124,16 @@ variables so themes just work.
 - Insights and head-to-head are computed from the most recent 100–150 games the API returns per request
   window; a production backend would ingest full histories and precompute these.
 - Official ladder ids are reverse-engineered; names in `constants.js` cover the common ones.
-- Not yet used: `games/last?include_stats` (per-game economy stats), esports Elo, replay download links,
-  AoE4 World bulk dumps.
+- Not yet used: `games/last?include_stats` (per-game economy stats), esports Elo, AoE4 World bulk dumps.
+- Replays are *orders*: "villagers queued" over-counts cancelled units, and civilizations whose workers spawn
+  without an order (Viking Bondi from Longhouses) are excluded from villager comparisons. The official store keeps
+  one upload per player perspective; a player who dropped early uploads a truncated file, so the fetcher takes the
+  largest file and re-fetches when a cached copy is shorter than 70 % of the game. It also rate-limits bursts
+  (HTTP 429): profile analysis stops at the first 429 and offers a retry.
+- Skill-radar scales are fixed ladder-wide ranges, not adjusted per civilization or mode; bracket benchmarks need
+  a replay corpus (roadmap M4).
 - Obvious additions: rating distribution per ladder (needs ingestion), clan/team pages, player notes and
-  favourites (local storage), build-order/timeline from replays.
+  favourites (local storage). See `docs/ROADMAP_IDEAS.md` for the full backlog.
 
 This is an unofficial fan prototype. Age of Empires IV is a trademark of Microsoft; game assets are used
 under Microsoft's Game Content Usage Rules. Data courtesy of AoE4 World.

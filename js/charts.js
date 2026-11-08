@@ -38,11 +38,12 @@ function bisect(points, x) {
  * Multi-series line chart over time.
  * series: [{ name, color ('--s1' or css color), points: [{x: ms, y, meta?}] }]
  */
-export function lineChart({ series, height = 260, yFormat = v => fmt.int(v), xIsTime = true, directLabels = true, area = null, yDomain = null, emptyText = 'Not enough data to chart' }) {
+export function lineChart({ series, height = 260, yFormat = v => fmt.int(v), xIsTime = true, xFormat = null, markers = [], directLabels = true, legend = true, area = null, yDomain = null, xDomain = null, emptyText = 'Not enough data to chart' }) {
   const root = el('div', { class: 'chart' });
   const data = series.filter(s => s.points && s.points.length).map(s => ({ ...s, points: [...s.points].sort((a, b) => a.x - b.x) }));
   if (!data.length || data.every(s => s.points.length < 2)) { root.append(el('div', { class: 'chart-empty' }, emptyText)); return root; }
   const showArea = area ?? data.length === 1;
+  const fx = xFormat || (xIsTime ? null : (v => fmt.int(v)));
 
   let ro = null;
   function render(width) {
@@ -52,11 +53,12 @@ export function lineChart({ series, height = 260, yFormat = v => fmt.int(v), xIs
     const W = Math.max(240, width), H = height;
     const pw = W - M.left - M.right, ph = H - M.top - M.bottom;
     const all = data.flatMap(s => s.points);
-    const x0 = Math.min(...all.map(p => p.x)), x1 = Math.max(...all.map(p => p.x));
+    let x0 = Math.min(...all.map(p => p.x)), x1 = Math.max(...all.map(p => p.x));
+    if (xDomain) { x0 = xDomain[0]; x1 = xDomain[1]; }
     let yMin = Math.min(...all.map(p => p.y)), yMax = Math.max(...all.map(p => p.y));
     if (yDomain) { yMin = yDomain[0]; yMax = yDomain[1]; }
     const pad = (yMax - yMin) * 0.08 || 10;
-    const { ticks, lo, hi } = niceTicks(yMin - pad, yMax + pad, 4);
+    const { ticks, lo, hi } = niceTicks(yMin >= 0 && !yDomain ? Math.max(0, yMin - pad) : yMin - pad, yMax + pad, 4);
     const sx = x => M.left + (x1 === x0 ? pw / 2 : (x - x0) / (x1 - x0) * pw);
     const sy = y => M.top + ph - (y - lo) / (hi - lo) * ph;
 
@@ -70,7 +72,13 @@ export function lineChart({ series, height = 260, yFormat = v => fmt.int(v), xIs
     svg.append(svgEl('line', { class: 'axis-line', x1: M.left, x2: W - M.right, y1: M.top + ph, y2: M.top + ph }));
     const span = x1 - x0;
     const xt = timeTicks(x0, x1, Math.max(2, Math.min(6, Math.floor(pw / 110))));
-    xt.forEach((t, i) => svg.append(svgEl('text', { class: 'tick', x: sx(t), y: H - 6, 'text-anchor': i === 0 ? 'start' : i === xt.length - 1 ? 'end' : 'middle' }, xIsTime ? timeLabel(t, span) : fmt.int(t))));
+    xt.forEach((t, i) => svg.append(svgEl('text', { class: 'tick', x: sx(t), y: H - 6, 'text-anchor': i === 0 ? 'start' : i === xt.length - 1 ? 'end' : 'middle' }, fx ? fx(t) : timeLabel(t, span))));
+    // vertical markers (e.g. age-ups), drawn under the series
+    for (const m of markers) {
+      if (m.x < x0 || m.x > x1) continue;
+      svg.append(svgEl('line', { class: 'marker-line', x1: sx(m.x), x2: sx(m.x), y1: M.top, y2: M.top + ph, stroke: resolveColor(m.color) || 'var(--axis)' }));
+      if (m.label) svg.append(svgEl('text', { class: 'marker-label', x: sx(m.x) + 3, y: M.top + 10 + (m.row || 0) * 12, fill: resolveColor(m.color) || 'var(--muted)' }, m.label));
+    }
 
     // series
     data.forEach(s => {
@@ -107,7 +115,7 @@ export function lineChart({ series, height = 260, yFormat = v => fmt.int(v), xIs
       });
       if (snapX === null) return;
       cross.setAttribute('x1', sx(snapX)); cross.setAttribute('x2', sx(snapX)); cross.setAttribute('visibility', 'visible');
-      const title = xIsTime ? new Date(snapX).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }) : String(snapX);
+      const title = fx ? fx(snapX) : new Date(snapX).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
       showTooltip(clientX, clientY, ttRows(title, rows));
     };
     const leave = () => { cross.setAttribute('visibility', 'hidden'); dots.forEach(d => d.setAttribute('visibility', 'hidden')); hideTooltip(); };
@@ -127,7 +135,7 @@ export function lineChart({ series, height = 260, yFormat = v => fmt.int(v), xIs
     });
     hit.addEventListener('blur', leave);
     root.append(svg);
-    if (data.length > 1) root.append(el('div', { class: 'legend' }, data.map(s => el('span', { class: 'key' }, el('i', { style: { '--c': resolveColor(s.color) } }), s.name))));
+    if (data.length > 1 && legend) root.append(el('div', { class: 'legend' }, data.map(s => el('span', { class: 'key' }, el('i', { style: { '--c': resolveColor(s.color) } }), s.name))));
   }
   // Render when attached and on resize.
   const start = () => { const w = root.clientWidth || root.parentElement?.clientWidth || 720; render(w); };
@@ -180,6 +188,56 @@ export function heatmap({ rows, cols, value, color, rowLabel, colLabel, tooltip,
     }
   }
   return grid;
+}
+
+/**
+ * Radar (spider) chart for comparing players on a few normalised axes.
+ * axes: [{ key, label, min, max, invert?, format(v) }]   series: [{ name, color, values: {key: number|null} }]
+ * Each value is mapped to 0..1 within [min, max] (inverted when lower is better). A table twin is appended.
+ */
+export function radarChart({ axes, series, size = 300 }) {
+  const root = el('div', { class: 'radar' });
+  const n = axes.length, cx = size / 2, cy = size / 2, r = size / 2 - 36;
+  const ang = i => -Math.PI / 2 + i * 2 * Math.PI / n;
+  const norm = (ax, v) => {
+    if (v === null || v === undefined || !Number.isFinite(v)) return null;
+    let t = (v - ax.min) / (ax.max - ax.min);
+    t = Math.max(0, Math.min(1, t));
+    return ax.invert ? 1 - t : t;
+  };
+  const pt = (i, t) => [cx + Math.cos(ang(i)) * r * t, cy + Math.sin(ang(i)) * r * t];
+  const svg = svgEl('svg', { viewBox: `0 0 ${size} ${size}`, width: size, height: size, role: 'img', 'aria-label': 'Skill radar' });
+  for (const ring of [0.25, 0.5, 0.75, 1]) svg.append(svgEl('polygon', { class: 'radar-ring', points: axes.map((_, i) => pt(i, ring).map(v => v.toFixed(1)).join(',')).join(' ') }));
+  axes.forEach((ax, i) => {
+    const [x, y] = pt(i, 1);
+    svg.append(svgEl('line', { class: 'radar-spoke', x1: cx, y1: cy, x2: x, y2: y }));
+    const [lx, ly] = pt(i, 1.16);
+    svg.append(svgEl('text', { class: 'radar-label', x: lx, y: ly + 4, 'text-anchor': Math.abs(lx - cx) < 4 ? 'middle' : lx > cx ? 'start' : 'end' }, ax.label));
+  });
+  for (const s of series) {
+    const color = resolveColor(s.color);
+    const pts = axes.map((ax, i) => pt(i, norm(ax, s.values[ax.key]) ?? 0));
+    svg.append(svgEl('polygon', { class: 'radar-area', points: pts.map(p => p.map(v => v.toFixed(1)).join(',')).join(' '), fill: color, stroke: color }));
+    axes.forEach((ax, i) => {
+      const v = s.values[ax.key];
+      const [x, y] = pts[i];
+      const dot = svgEl('circle', { class: 'radar-dot', cx: x, cy: y, r: 4, fill: color, tabindex: 0 });
+      const tt = () => ttRows(ax.label, [{ label: s.name, value: v === null || v === undefined ? '—' : (ax.format ? ax.format(v) : fmt.dec(v, 1)), color }]);
+      dot.addEventListener('pointermove', e => showTooltip(e.clientX, e.clientY, tt()));
+      dot.addEventListener('pointerleave', hideTooltip);
+      dot.addEventListener('focus', () => { const b = dot.getBoundingClientRect(); showTooltip(b.left, b.top, tt()); });
+      dot.addEventListener('blur', hideTooltip);
+      svg.append(dot);
+    });
+  }
+  root.append(svg);
+  const table = el('table', { class: 'data compact radar-table' },
+    el('thead', {}, el('tr', {}, el('th', {}, 'Axis'), series.map(s => el('th', { class: 'num' }, el('span', { class: 'key' }, el('i', { class: 'rect', style: { '--c': resolveColor(s.color), display: 'inline-block', width: '10px', height: '10px', borderRadius: '3px', background: resolveColor(s.color), marginRight: '6px' } }), s.name))), el('th', { class: 'muted' }, 'Scale'))),
+    el('tbody', {}, axes.map(ax => el('tr', {}, el('td', {}, ax.label, ax.hint ? el('span', { class: 'muted small' }, ` · ${ax.hint}`) : null),
+      series.map(s => { const v = s.values[ax.key]; return el('td', { class: 'num' }, v === null || v === undefined ? el('span', { class: 'muted' }, '—') : (ax.format ? ax.format(v) : fmt.dec(v, 1))); }),
+      el('td', { class: 'muted small' }, `${ax.format ? ax.format(ax.min) : ax.min} – ${ax.format ? ax.format(ax.max) : ax.max}${ax.invert ? ' (lower is better)' : ''}`)))));
+  root.append(el('div', { class: 'table-wrap', style: { marginTop: '8px' } }, table));
+  return root;
 }
 
 export function scaleLegend(leftLabel, rightLabel, midLabel = '50%') {

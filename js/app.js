@@ -10,10 +10,14 @@ import * as maps from './pages/maps.js';
 import * as live from './pages/live.js';
 import * as data from './pages/data.js';
 import * as mygames from './pages/mygames.js';
+import * as game from './pages/game.js';
+import * as scout from './pages/scout.js';
 
 const routes = [
   { test: p => p.length === 0, page: home, nav: null },
   { test: p => p[0] === 'player' && /^\d+$/.test(p[1] || ''), page: player, nav: null },
+  { test: p => p[0] === 'game' && /^\d+$/.test(p[1] || ''), page: game, nav: null },
+  { test: p => p[0] === 'scout', page: scout, nav: 'scout' },
   { test: p => p[0] === 'compare', page: compare, nav: 'compare' },
   { test: p => p[0] === 'leaderboard', page: leaderboard, nav: 'leaderboard' },
   { test: p => p[0] === 'civs', page: civs, nav: 'civs' },

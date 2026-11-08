@@ -91,7 +91,10 @@ def is_replay_bytes(b):
 
 
 def load(path):
-    b = open(path, 'rb').read()
+    return load_bytes(open(path, 'rb').read())
+
+
+def load_bytes(b):
     if b[:2] == b'\x1f\x8b':
         b = gzip.decompress(b)
     if b[4:11] != b'AOE4_RE':

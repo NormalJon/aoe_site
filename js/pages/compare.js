@@ -1,7 +1,8 @@
 import { el, fmt, setTitle, hrefTo, navigate, clear, groupBy, winRate, mean, countryName } from '../util.js';
 import { api, fetchPlayerGames } from '../api.js';
 import { searchBox, avatarImg, countryFlag, rankBadge, modeTabs, civChip, dataTable, gameRow, card, notice, skeleton, errorBox, emptyState, wrCell, playerLink, flattenTeams, statTile } from '../components.js';
-import { lineChart } from '../charts.js';
+import { lineChart, radarChart } from '../charts.js';
+import { getJSON, ApiError } from '../api.js';
 import { MODE, PROFILE_MODES, modeName, civName, parseRankLevel } from '../constants.js';
 import { fillAsync, ratingHistoryPoints, modesWithData, gamesFilterFor, pageHead } from './_shared.js';
 
@@ -95,6 +96,25 @@ export async function render(app, route) {
       card('Civilization pools', el('div', {}, db, el('div', { class: 'legend' }, el('span', { class: 'key' }, el('i', { class: 'rect', style: { '--c': 'var(--s1)' } }), A.name), el('span', { class: 'key' }, el('i', { class: 'rect', style: { '--c': 'var(--s2)' } }), B.name), el('span', { class: 'muted' }, '· dot position = pick rate, scaled to the most-picked civ'))), { meta: 'top 12 by combined games' }),
       card('Win rates by civ', civTable, { flush: true })));
   }
+
+  /* ----- skill radar (replays via the companion) ----- */
+  const radarBox = el('div', {}, skeleton(5));
+  holder.append(el('div', { style: { marginTop: '16px' } }, card('Skill radar', radarBox, { meta: 'medians over each player’s recently analysed replays · fixed ladder-wide scales' })));
+  Promise.all([getJSON(`local/profile/${a}?n=10&budget=15`, { ttl: 10 * 60e3 }), getJSON(`local/profile/${b}?n=10&budget=15`, { ttl: 10 * 60e3 })]).then(([pa, pb]) => {
+    clear(radarBox);
+    if (!pa.analysed && !pb.analysed) { radarBox.append(notice('No replays analysed for either player yet', pa.rate_limited || pb.rate_limited ? ' (the official replay store is rate-limiting downloads; try again in a minute).' : '.')); return; }
+    const axes = [
+      { key: 'eco', label: 'Economy', hint: 'villagers queued by 10:00', min: 15, max: 50, format: v => fmt.int(v) },
+      { key: 'tempo', label: 'Tempo', hint: 'median Feudal time', min: 180, max: 540, invert: true, format: v => fmt.duration(v) },
+      { key: 'aggr', label: 'Aggression', hint: 'military queued by 8:00', min: 0, max: 20, format: v => fmt.int(v) },
+      { key: 'army', label: 'Army', hint: 'military queued by 12:00', min: 0, max: 45, format: v => fmt.int(v) },
+      { key: 'expand', label: 'Expansion', hint: 'Town Centers per game', min: 1, max: 4, format: v => fmt.dec(v, 1) },
+      { key: 'macro', label: 'Macro', hint: 'commands per minute', min: 30, max: 200, format: v => fmt.int(v) },
+    ];
+    const vals = p => ({ eco: p.medians?.villagers_by_10, tempo: p.medians?.feudal, aggr: p.medians?.military_by_8, army: p.medians?.military_by_12, expand: p.medians?.tcs, macro: p.medians?.apm });
+    radarBox.append(radarChart({ axes, series: [{ name: `${A.name} (${pa.analysed} games)`, color: '--s1', values: vals(pa) }, { name: `${B.name} (${pb.analysed} games)`, color: '--s2', values: vals(pb) }] }));
+    radarBox.append(el('p', { class: 'muted small', style: { margin: '8px 0 0' } }, 'Each axis is scaled to a fixed ladder-wide range (shown in the table), so two profiles are comparable and a bigger shape means stronger fundamentals, not just “more than the other player”. Values are medians of order counts from replays; they are not adjusted for civilization or game mode yet.'));
+  }).catch(e => { clear(radarBox); radarBox.append(notice(!(e instanceof ApiError) || [404, 501, 405].includes(e.status) ? 'The skill radar needs the local companion (py -3 server.py), which analyses each player’s recent replays.' : String(e.message || e))); });
 
   /* ----- head to head ----- */
   const h2hBox = el('div');

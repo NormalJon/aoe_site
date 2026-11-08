@@ -119,7 +119,9 @@ class Blueprints:
                     age_target = {'wonder_dark_age': 2, 'wonder_feudal_age': 3, 'wonder_castle_age': 4}.get(next((c for c in classes if c.startswith('wonder_') and c.endswith('_age')), None))
                 elif role == 'age_up' and isinstance(it.get('age'), int) and it['age'] < 4:
                     age_target = it['age'] + 1  # a wing researched in Imperial is not an age-up
-                self.by_id.setdefault(pb, {'name': it.get('name'), 'base': self.base_name(it.get('name') or ''), 'kind': kind, 'classes': sorted(classes), 'role': role, 'age': it.get('age'), 'age_target': age_target})
+                costs = it.get('costs') or {}
+                self.by_id.setdefault(pb, {'name': it.get('name'), 'base': self.base_name(it.get('name') or ''), 'kind': kind, 'classes': sorted(classes), 'role': role, 'age': it.get('age'), 'age_target': age_target,
+                                           'icon': it.get('icon'), 'costs': {k: int(costs.get(k) or 0) for k in ('food', 'wood', 'gold', 'stone')}})
 
     TIER_PREFIXES = ('Early ', 'Veteran ', 'Elite ', 'Hardened ')
 
@@ -229,41 +231,88 @@ def local_replays(cfg):
     return found
 
 
-def fetch_official_replay(game_id):
-    """Ask World's Edge for signed replay links for this match and download the first that works.
-    Returns (path | None, status string)."""
+def fetch_official_replay(game_id, min_duration=None, force=False):
+    """Ask World's Edge for signed replay links for this match and download the best one.
+    The store keeps one upload per player *perspective*; a player who dropped early uploads a truncated file,
+    so candidates are tried largest-first and, when `min_duration` is known, a file shorter than 70% of the
+    game is skipped while a longer one may exist. Returns (path | None, status string)."""
     marker = CACHE / 'analysis' / f'{game_id}.fetch.json'
+    st = {}
     if marker.exists():
-        st = json.loads(marker.read_text())
-        if st.get('status') == 'not_found' and time.time() - st.get('at', 0) < 86400:
+        try:
+            st = json.loads(marker.read_text())
+        except Exception:  # noqa: BLE001
+            st = {}
+        if st.get('status') == 'not_found' and time.time() - st.get('at', 0) < 86400 and not force:
             return None, 'not_found'
     dest = CACHE / 'replays' / f'M_{game_id}.gz'
-    if dest.exists():
+    if dest.exists() and not force:
         return dest, 'cached'
     url = WE + 'leaderboard/getReplayFiles?' + urllib.parse.urlencode({'matchIDs': json.dumps([int(game_id)]), 'title': 'age4'})
     try:
         meta = json.loads(http_get(url, 30))
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            return None, 'rate_limited'
+        return None, f'list failed: {e}'
     except Exception as e:  # noqa: BLE001
         return None, f'list failed: {e}'
     code = (meta.get('result') or {}).get('code')
-    files = [f for f in (meta.get('replayFiles') or []) if f.get('datatype') == 0 and f.get('url')]
+    files = [f for f in (meta.get('replayFiles') or []) if f.get('datatype') == 0 and f.get('url') and (f.get('size') or 0) != -1]
+    files.sort(key=lambda f: -(f.get('size') or 0))
     if code == 2 or not files:
         marker.write_text(json.dumps({'status': 'not_found', 'at': time.time()}))
         return None, 'not_found'
     last = None
-    for f in files:
+    best = None  # (duration, data, profile_id)
+    for f in files[:4]:
         try:
             data = http_get(f['url'], 120)
         except Exception as e:  # noqa: BLE001
             last = str(e)
             continue
-        if aoe4rec.is_replay_bytes(data):
-            if data[:2] != GZIP_MAGIC:
-                data = gzip.compress(data)
-            dest.write_bytes(data)
-            marker.write_text(json.dumps({'status': 'ok', 'at': time.time(), 'perspective': f.get('profile_id')}))
-            return dest, 'downloaded'
-    return None, f'all perspectives failed ({last})'
+        if not aoe4rec.is_replay_bytes(data):
+            continue
+        if data[:2] != GZIP_MAGIC:
+            data = gzip.compress(data)
+        dur = None
+        if min_duration:
+            try:
+                dur = aoe4rec.load_bytes(data)['duration']
+            except Exception:  # noqa: BLE001
+                dur = None
+        if best is None or (dur or 0) > (best[0] or 0):
+            best = (dur, data, f.get('profile_id'))
+        if not min_duration or (dur or 0) >= 0.7 * min_duration:
+            break
+    if best is None:
+        return None, f'all perspectives failed ({last})'
+    dest.write_bytes(best[1])
+    marker.write_text(json.dumps({'status': 'ok', 'at': time.time(), 'perspective': best[2], 'duration': best[0], 'longest': bool(min_duration), 'perspectives': len(files)}))
+    return dest, 'downloaded'
+
+
+def ensure_full_replay(game_id, path, expected_duration):
+    """If a cached store download is much shorter than the game, try the other perspectives once."""
+    marker = CACHE / 'analysis' / f'{game_id}.fetch.json'
+    if path is None or not expected_duration or path.parent != CACHE / 'replays':
+        return path, None
+    try:
+        st = json.loads(marker.read_text()) if marker.exists() else {}
+    except Exception:  # noqa: BLE001
+        st = {}
+    if st.get('longest'):
+        return path, None
+    try:
+        dur = aoe4rec.load(path)['duration']
+    except Exception:  # noqa: BLE001
+        return path, None
+    if dur >= 0.7 * expected_duration:
+        st['longest'] = True
+        marker.write_text(json.dumps(st))
+        return path, None
+    p2, status = fetch_official_replay(game_id, min_duration=expected_duration, force=True)
+    return (p2 or path), status
 
 
 # ----------------------------------------------------------------------------- API data
@@ -288,6 +337,22 @@ def my_games(cfg, refresh=False):
 
 def api_game(me, game_id):
     return cached_json(f'game_{game_id}', A4W + f'players/{me}/games/{game_id}', 30 * 86400)
+
+
+def player_games(pid, pages=2, refresh=False):
+    """Recent games of any player (newest first), cached 10 minutes."""
+    p = CACHE / 'data' / f'games_{pid}_p{pages}.json'
+    if p.exists() and not refresh and time.time() - p.stat().st_mtime < 600:
+        return json.loads(p.read_text(encoding='utf-8'))
+    games, page = [], 1
+    while page <= pages:
+        d = json.loads(http_get(A4W + f'players/{pid}/games?limit=50&page={page}'))
+        games += d.get('games') or []
+        if not d.get('next_page'):
+            break
+        page = d['next_page']
+    p.write_text(json.dumps(games), encoding='utf-8')
+    return games
 
 
 def official_history(me, refresh=False):
@@ -325,29 +390,74 @@ def mmss(s):
 def analyze_replay(path, bp=None):
     bp = bp or blueprints()
     path = Path(path)
-    key = CACHE / 'analysis' / (re.sub(r'[^A-Za-z0-9_.-]', '_', path.name) + f'.{int(path.stat().st_mtime)}.v4.json')
+    key = CACHE / 'analysis' / (re.sub(r'[^A-Za-z0-9_.-]', '_', path.name) + f'.{int(path.stat().st_mtime)}.v5.json')
     if key.exists():
         return json.loads(key.read_text(encoding='utf-8'))
     r = aoe4rec.load(path)
-    out = {'file': path.name, 'build': r['version'], 'date': r['date'], 'duration': r['duration'], 'players': []}
+    out = {'file': path.name, 'build': r['version'], 'date': r['date'], 'duration': r['duration'], 'players': [], 'blueprints': {}}
+    used = out['blueprints']
+    MIL_ROLES = ('cavalry', 'ranged', 'infantry', 'siege', 'naval', 'other')
+    nmin = int(r['duration'] // 60) + 1
     for p in r['players']:
         mine = [c for c in r['commands'] if c.pid == p.pid]
         trains, builds, techs = [], [], []
+        events = []                      # compact command stream: consecutive identical orders in one minute collapse
+        counts = Counter()               # pbgid -> orders
+        per_minute = [{'villagers': 0, 'military': 0, 'buildings': 0, 'techs': 0, 'food': 0, 'wood': 0, 'gold': 0, 'stone': 0, 'mil_spend': 0, 'eco_spend': 0} for _ in range(nmin)]
         for c in mine:
             b = bp.get(c.pbgid)
-            if c.kind == 'train' and b and b['kind'] == 'unit':
+            if not b:
+                continue
+            if c.kind == 'train' and b['kind'] == 'unit':
                 trains.append((c.time, b))
-            elif c.kind == 'build' and b and b['kind'] == 'building':
+            elif c.kind == 'build' and b['kind'] == 'building':
                 builds.append((c.time, b, c.pos))
-            elif c.kind == 'research' and b and b['kind'] == 'tech':
+            elif c.kind == 'research' and b['kind'] == 'tech':
                 techs.append((c.time, b))
-        mil = [(t, b) for t, b in trains if b['role'] in ('cavalry', 'ranged', 'infantry', 'siege', 'naval', 'other')]
+            else:
+                continue
+            used.setdefault(c.pbgid, {'name': b['name'], 'icon': b['icon'], 'kind': b['kind'], 'role': b['role'], 'age': b['age']})
+            counts[c.pbgid] += 1
+            m = min(nmin - 1, int(c.time // 60))
+            pm = per_minute[m]
+            cost = b.get('costs') or {}
+            total = 0
+            for k in ('food', 'wood', 'gold', 'stone'):
+                pm[k] += cost.get(k, 0)
+                total += cost.get(k, 0)
+            if b['kind'] == 'unit':
+                if b['role'] == 'villager':
+                    pm['villagers'] += 1
+                    pm['eco_spend'] += total
+                elif b['role'] in MIL_ROLES:
+                    pm['military'] += 1
+                    pm['mil_spend'] += total
+                else:
+                    pm['eco_spend'] += total
+            elif b['kind'] == 'building':
+                pm['buildings'] += 1
+                pm['mil_spend' if b['role'] in ('military', 'defense') else 'eco_spend'] += total
+            else:
+                pm['techs'] += 1
+                pm['eco_spend'] += total
+            if events and events[-1]['id'] == c.pbgid and events[-1]['k'] == c.kind and int(events[-1]['t'] // 60) == m:
+                events[-1]['n'] += 1
+            else:
+                events.append({'t': round(c.time, 1), 'k': c.kind, 'id': c.pbgid, 'n': 1})
+        mil = [(t, b) for t, b in trains if b['role'] in MIL_ROLES]
         by_unit = Counter(b['base'] for _, b in trains)          # tiers (Veteran/Elite…) folded into the base unit
         by_unit_exact = Counter(b['name'] for _, b in trains)
         by_role = Counter(b['role'] for _, b in trains)
         timeline = defaultdict(Counter)
         for t, b in trains:
             timeline[int(t // 300)][b['role']] += 1   # 5-minute buckets
+        vill_times = [t for t, b in trains if b['role'] == 'villager']
+        gap, gap_at = 0.0, None
+        for a, z in zip(vill_times, vill_times[1:]):
+            if a < 900 and z - a > gap:
+                gap, gap_at = z - a, a
+        if vill_times and vill_times[0] > gap and vill_times[0] < 900:
+            gap, gap_at = vill_times[0], 0.0
         landmarks = [(t, b['name']) for t, b, _ in builds if b['role'] == 'landmark']
         # age-ups: earliest placement/research that targets each age (landmarks declare their age; Abbasid wings are techs)
         by_target = {}
@@ -385,6 +495,16 @@ def analyze_replay(path, bp=None):
             'research': [{'time': t, 'name': b['name']} for t, b in techs],
             'build_order': [{'time': t, 'kind': 'build', 'name': b['name']} for t, b, _ in builds][:80],
             'timeline': {str(k * 5): dict(v) for k, v in sorted(timeline.items())},
+            # phase 2: minute buckets, compact event stream, counts per blueprint, villager-production rhythm
+            'per_minute': per_minute,
+            'events': events[:900],
+            'counts': {str(k): v for k, v in counts.most_common()},
+            'villager_gap': {'gap': round(gap, 1), 'at': gap_at} if gap_at is not None else None,
+            'last_villager': vill_times[-1] if vill_times else None,
+            'spend_total': sum(pm['food'] + pm['wood'] + pm['gold'] + pm['stone'] for pm in per_minute),
+            'spend_military': sum(pm['mil_spend'] for pm in per_minute),
+            'spend_by_15': {'military': sum(pm['mil_spend'] for pm in per_minute[:15]), 'total': sum(pm['mil_spend'] + pm['eco_spend'] for pm in per_minute[:15])},
+            'military_by_12': before(720, mil), 'military_by_15': before(900, mil),
         })
     key.write_text(json.dumps(out), encoding='utf-8')
     return out
@@ -525,18 +645,150 @@ def list_games(cfg, refresh=False):
     return {'me': me, 'count': len(rows), 'replays_available': sum(r['has_replay'] for r in rows), 'counters_available': sum(r['has_counters'] for r in rows), 'games': rows}
 
 
-def game_detail(cfg, game_id, fetch=False):
+AGE_NAMES = {2: 'Feudal', 3: 'Castle', 4: 'Imperial'}
+AUTO_WORKER_CIVS = {'vikings'}   # workers appear without a train order, so replay villager counts are not comparable
+
+
+def _age_time(rp, age):
+    return next((a['time'] for a in rp.get('ages') or [] if a['age'] == age), None)
+
+
+def key_insights(teams, duration, focus_id):
+    """Rule-based sentences about the focus player's game, each with a tone and the numbers behind it.
+    Only uses replay-derived facts (orders), so wording says 'queued' / 'placed', never 'had'."""
+    rows = [p for t in teams for p in t]
+    me = next((p for p in rows if p['profile_id'] == focus_id), None)
+    if not me or not me.get('replay'):
+        return []
+    my_team = next(t for t in teams if me in t)
+    opps = [p for t in teams if t is not my_team for p in t if p.get('replay')]
+    mates = [p for p in my_team if p is not me and p.get('replay')]
+    R = me['replay']
+    name = me['name']
+    out = []
+
+    def add(tone, text, **nums):
+        out.append({'tone': tone, 'text': text, 'numbers': nums})
+
+    # 1. age-up timing vs the fastest opponent
+    for age in (2, 3, 4):
+        t = _age_time(R, age)
+        if t is None:
+            continue
+        theirs = [(_age_time(o['replay'], age), o) for o in opps]
+        theirs = [(x, o) for x, o in theirs if x is not None]
+        if not theirs:
+            if opps and duration and t < duration:
+                add('good', f"{name} was the only player to reach {AGE_NAMES[age]} ({mmss(t)}).", time=t)
+            continue
+        ft, fo = min(theirs, key=lambda x: x[0])
+        diff = ft - t
+        if diff >= 20:
+            add('good', f"{name} reached {AGE_NAMES[age]} at {mmss(t)}, {mmss(diff)} before the fastest opponent ({fo['name']} at {mmss(ft)}).", time=t, opp=ft)
+        elif diff <= -20:
+            add('bad', f"{name} reached {AGE_NAMES[age]} at {mmss(t)}, {mmss(-diff)} after {fo['name']} ({mmss(ft)}).", time=t, opp=ft)
+        else:
+            add('neutral', f"{name} and {fo['name']} reached {AGE_NAMES[age]} within {mmss(abs(diff))} of each other ({mmss(t)} vs {mmss(ft)}).", time=t, opp=ft)
+    # 2. villagers by 10:00 (skip civs whose workers spawn without a queue order, e.g. Viking Bondi from Longhouses)
+    vopps = [o for o in opps if o.get('civilization') not in AUTO_WORKER_CIVS]
+    if duration and duration >= 600 and vopps and me.get('civilization') not in AUTO_WORKER_CIVS:
+        opps_v = vopps
+        mine = R['villagers_by_10']
+        avg = sum(o['replay']['villagers_by_10'] for o in opps_v) / len(opps_v)
+        best = max(opps_v, key=lambda o: o['replay']['villagers_by_10'])
+        if mine - avg >= 3:
+            add('good', f"{name} queued {mine} villagers by 10:00; opponents averaged {avg:.0f}.", mine=mine, avg=avg)
+        elif avg - mine >= 3:
+            add('bad', f"{name} queued {mine} villagers by 10:00; opponents averaged {avg:.0f} ({best['name']}: {best['replay']['villagers_by_10']}).", mine=mine, avg=avg)
+        else:
+            add('neutral', f"Villager production was even by 10:00: {mine} for {name}, {avg:.0f} on average for the opponents.", mine=mine, avg=avg)
+    # 3. villager production stopped early
+    lv = R.get('last_villager')
+    if lv is not None and duration and R['villagers'] >= 20 and duration - lv > 240:
+        add('bad' if duration - lv > 480 else 'neutral', f"{name} queued the last villager at {mmss(lv)} ({R['villagers']} in total); the game ran another {mmss(duration - lv)}.", last=lv, total=R['villagers'])
+    # 4. longest pause in villager production (first 15 minutes)
+    vg = R.get('villager_gap')
+    if vg and vg['gap'] >= 75 and (duration or 0) >= 600:
+        add('bad' if vg['gap'] >= 120 else 'neutral', f"Longest pause in {name}'s villager production before 15:00: {mmss(vg['gap'])}, starting at {mmss(vg['at'])}.", gap=vg['gap'], at=vg['at'])
+    # 5. early military
+    if (duration or 0) >= 480 and opps:
+        mine8 = R['military_by_8']
+        fast = max(opps, key=lambda o: o['replay']['military_by_8'])
+        theirs8 = fast['replay']['military_by_8']
+        if mine8 == 0 and theirs8 >= 5:
+            add('neutral' if me.get('result') == 'win' else 'bad', f"{name} queued no military before 8:00 while {fast['name']} queued {theirs8} units — a boom that was open to pressure.", mine=mine8, opp=theirs8)
+        elif mine8 >= 6 and mine8 >= 2 * max(1, theirs8):
+            add('good', f"{name} out-produced every opponent early: {mine8} military units queued by 8:00 against {theirs8} for {fast['name']}.", mine=mine8, opp=theirs8)
+    # 6. expansion
+    if (duration or 0) >= 600:
+        my_tc = R['town_centers'][0] if R['town_centers'] else None
+        their = [(o['replay']['town_centers'][0], o) for o in opps if o['replay']['town_centers']]
+        if my_tc is not None and not their and opps:
+            add('good', f"{name} placed a second Town Center at {mmss(my_tc)}; no opponent expanded.", tc=my_tc)
+        elif my_tc is not None and their:
+            ft, fo = min(their, key=lambda x: x[0])
+            if ft - my_tc >= 60:
+                add('good', f"{name} expanded first: second Town Center at {mmss(my_tc)} vs {mmss(ft)} for {fo['name']}.", tc=my_tc, opp=ft)
+            elif my_tc - ft >= 60:
+                add('neutral', f"{fo['name']} expanded first ({mmss(ft)}); {name} followed at {mmss(my_tc)}.", tc=my_tc, opp=ft)
+        elif my_tc is None and their and duration >= 900:
+            ft, fo = min(their, key=lambda x: x[0])
+            add('neutral', f"{name} stayed on one Town Center; {fo['name']} expanded at {mmss(ft)}.", opp=ft)
+    # 7. where the resources went (first 15 minutes)
+    sb = R.get('spend_by_15') or {}
+    if sb.get('total', 0) >= 3000 and (duration or 0) >= 900:
+        share = 100 * sb['military'] / sb['total']
+        opp_share = None
+        tot = [(o['replay'].get('spend_by_15') or {}) for o in opps]
+        tot = [x for x in tot if x.get('total')]
+        if tot:
+            opp_share = 100 * sum(x['military'] for x in tot) / sum(x['total'] for x in tot)
+        txt = f"{name} put {share:.0f}% of resources into military units and buildings in the first 15 minutes"
+        txt += f" (opponents: {opp_share:.0f}%)." if opp_share is not None else '.'
+        add('neutral', txt, share=share, opp=opp_share)
+    # 8. team production by 12:00
+    if mates and opps and (duration or 0) >= 720:
+        ours = sum(p['replay']['military_by_12'] for p in my_team if p.get('replay'))
+        theirs = sum(o['replay']['military_by_12'] for o in opps)
+        if theirs and ours / theirs >= 1.3:
+            add('good', f"{name}'s team queued {ours / theirs:.1f}× the military of the opposing team by 12:00 ({ours} vs {theirs} units).", ours=ours, theirs=theirs)
+        elif ours and theirs / ours >= 1.3:
+            add('bad', f"The opposing team queued {theirs / ours:.1f}× the military of {name}'s team by 12:00 ({theirs} vs {ours} units).", ours=ours, theirs=theirs)
+    # 9. team carry: share of the team's military
+    if mates and R['military'] >= 20:
+        team_mil = sum(p['replay']['military'] for p in my_team if p.get('replay'))
+        share = 100 * R['military'] / max(1, team_mil)
+        if share >= 45 and len(my_team) >= 3:
+            add('good', f"{name} queued {share:.0f}% of the team's military units ({R['military']} of {team_mil}).", share=share)
+    # 10. composition
+    mbu = R.get('military_by_unit') or {}
+    if R['military'] >= 20 and mbu:
+        unit, n = max(mbu.items(), key=lambda kv: kv[1])
+        if n / R['military'] >= 0.6:
+            add('neutral', f"{name}'s army was {100 * n / R['military']:.0f}% {unit} ({n} of {R['military']} military units).", unit=unit, share=100 * n / R['military'])
+    return out[:8]
+
+
+def game_detail(cfg, game_id, fetch=False, profile=None):
+    """Everything we know about one game, from the perspective of `profile` (defaults to the configured 'me').
+    Works for any player's game: the API record comes from aoe4world, counters from the official recent-match
+    history of that profile, and unit-level detail from a replay (local file or the official store)."""
     me = cfg.get('me')
+    focus = int(profile) if profile else me
     game_id = int(game_id)
-    game = api_game(me, game_id)
+    game = api_game(focus, game_id)
     friends = cfg.get('friends') or []
     local = local_replays(cfg)
-    path, fetch_status = local.get(game_id), 'local' if game_id in local else None
+    path = local.get(game_id)
+    fetch_status = None if path is None else ('cached' if path.parent == CACHE / 'replays' else 'local')
     if path is None and fetch:
-        path, fetch_status = fetch_official_replay(game_id)
+        path, fetch_status = fetch_official_replay(game_id, min_duration=game.get('duration'))
+    elif path is not None:
+        path, st2 = ensure_full_replay(game_id, path, game.get('duration'))
+        fetch_status = st2 or fetch_status
     hist = {}
     try:
-        hist = official_history(me)
+        hist = official_history(focus)
     except Exception:  # noqa: BLE001
         pass
     counters = (hist.get(game_id) or {}).get('players', {})
@@ -559,6 +811,7 @@ def game_detail(cfg, game_id, fetch=False):
         if counters.get(p['profile_id']):
             row['tags'] += counter_tags(p['profile_id'], counters[p['profile_id']], counters)
         row['is_me'] = p['profile_id'] == me
+        row['is_focus'] = p['profile_id'] == focus
         row['friend'] = any(f['profile_id'] == p['profile_id'] for f in friends)
         players.append(row)
     teams = []
@@ -566,10 +819,169 @@ def game_detail(cfg, game_id, fetch=False):
         ids = [(x.get('player', x))['profile_id'] for x in t]
         teams.append([pl for pl in players if pl['profile_id'] in ids])
     return {
-        'game': {k: v for k, v in game.items() if k != 'teams'}, 'teams': teams,
-        'tags': game_tags(game, me, friends, duration),
+        'game': {k: v for k, v in game.items() if k != 'teams'}, 'teams': teams, 'focus': focus,
+        'tags': game_tags(game, focus, friends, duration),
+        'insights': key_insights(teams, duration, focus) if analysis else [],
+        'blueprints': (analysis or {}).get('blueprints') or {},
         'replay': {'available': analysis is not None, 'status': fetch_status, 'file': (analysis or {}).get('file'), 'build': (analysis or {}).get('build'), 'date': (analysis or {}).get('date')},
         'counters_available': bool(counters),
+    }
+
+
+# ----------------------------------------------------------------------------- playstyle profile (any player)
+
+PROFILE_FIELDS = ('villagers', 'villagers_by_10', 'military', 'military_by_6', 'military_by_8', 'military_by_10', 'military_by_12', 'town_centers', 'ages',
+                  'apm_replay', 'commands', 'first_military', 'spend_total', 'spend_military', 'defense_total', 'by_role', 'military_by_unit', 'last_villager', 'villager_gap')
+
+
+def _median(xs):
+    xs = sorted(x for x in xs if x is not None)
+    if not xs:
+        return None
+    m = len(xs) // 2
+    return xs[m] if len(xs) % 2 else (xs[m - 1] + xs[m]) / 2
+
+
+def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False):
+    """Aggregate replay-derived tags, medians and records over a player's recent games.
+    Fetches replays from the official store as needed, a few per call (time budget), and caches everything.
+    Returns a partial result with `pending` > 0 when more games could still be analysed."""
+    pid = int(pid)
+    store = CACHE / 'analysis' / f'profile_{pid}.json'
+    state = {'analysed': {}, 'missing': {}}
+    if store.exists():
+        try:
+            state = json.loads(store.read_text(encoding='utf-8'))
+        except Exception:  # noqa: BLE001
+            pass
+    games = player_games(pid, pages=2, refresh=refresh)
+    finished = [g for g in games if not g.get('ongoing') and (g.get('duration') or 0) >= 480]
+    local = local_replays(cfg)
+    deadline = time.time() + budget
+    rate_limited = False
+    for g in finished:
+        gid = str(g['game_id'])
+        if len(state['analysed']) >= want:
+            break
+        if gid in state['analysed']:
+            continue
+        miss = state['missing'].get(gid)
+        if miss and (miss.get('status') == 'not_found' or time.time() - miss.get('at', 0) < 600):
+            continue
+        if time.time() > deadline:
+            break
+        path = local.get(int(gid))
+        status = 'local'
+        if path is None:
+            path, status = fetch_official_replay(int(gid), min_duration=g.get('duration'))
+            time.sleep(1.0)  # the store rate-limits bursts
+        else:
+            path, st2 = ensure_full_replay(int(gid), path, g.get('duration'))
+            status = st2 or status
+        if path is None:
+            if status == 'rate_limited':
+                rate_limited = True
+                break
+            state['missing'][gid] = {'status': status, 'at': time.time()}
+            continue
+        try:
+            a = analyze_replay(path)
+        except Exception as e:  # noqa: BLE001
+            state['missing'][gid] = {'status': f'unreadable: {e}', 'at': time.time()}
+            continue
+        me = next((p for t in g.get('teams') or [] for x in t for p in [x.get('player', x)] if p['profile_id'] == pid), None)
+        rp = next((p for p in a['players'] if me and p['name'] == me['name']), None)
+        if rp is None:
+            state['missing'][gid] = {'status': 'name mismatch', 'at': time.time()}
+            continue
+        summary = {k: rp.get(k) for k in PROFILE_FIELDS}
+        summary.update({'game_id': g['game_id'], 'started_at': g['started_at'], 'kind': g['kind'], 'map': g['map'], 'duration': g.get('duration') or a['duration'],
+                        'civ': me.get('civilization'), 'result': me.get('result'), 'rating_diff': me.get('rating_diff'), 'source': status,
+                        'tags': [t['tag'] for t in player_tags(rp, g.get('duration') or a['duration'], a['players'])],
+                        'tag_labels': {t['tag']: t['label'] for t in player_tags(rp, g.get('duration') or a['duration'], a['players'])}})
+        state['analysed'][gid] = summary
+    store.write_text(json.dumps(state), encoding='utf-8')
+
+    rows = sorted(state['analysed'].values(), key=lambda s: s['started_at'], reverse=True)
+    n = len(rows)
+    tag_counts, labels = Counter(), {}
+    for s in rows:
+        for t in s['tags']:
+            tag_counts[t] += 1
+            labels[t] = s['tag_labels'].get(t, t)
+    tags = [{'tag': t, 'label': labels[t], 'count': c, 'pct': round(100 * c / n)} for t, c in tag_counts.most_common() if not t.startswith('with:')]
+    feudal = [_age_time(s, 2) for s in rows]
+    castle = [_age_time(s, 3) for s in rows]
+    imperial = [_age_time(s, 4) for s in rows]
+    vrows = [s for s in rows if s.get('civ') not in AUTO_WORKER_CIVS]   # Viking Bondi spawn without orders
+    medians = {
+        'villagers_by_10': _median([s['villagers_by_10'] for s in vrows]),
+        'villagers': _median([s['villagers'] for s in vrows]),
+        'feudal': _median(feudal), 'castle': _median(castle), 'imperial': _median(imperial),
+        'military_by_8': _median([s['military_by_8'] for s in rows]), 'military_by_12': _median([s['military_by_12'] for s in rows]),
+        'military': _median([s['military'] for s in rows]),
+        'tcs': _median([len(s['town_centers'] or []) + 1 for s in rows]),
+        'apm': _median([s['apm_replay'] for s in rows]),
+        'mil_share': _median([100 * s['spend_military'] / s['spend_total'] for s in rows if s.get('spend_total')]),
+        'duration': _median([s['duration'] for s in rows]),
+    }
+    comp = Counter()
+    for s in rows:
+        for role, c in (s.get('by_role') or {}).items():
+            if role in ('cavalry', 'ranged', 'infantry', 'siege', 'naval'):
+                comp[role] += c
+    total_mil = sum(comp.values()) or 1
+    composition = {k: round(100 * v / total_mil) for k, v in comp.most_common()}
+
+    def best(key, items, reverse=False):
+        items = [(v, s) for v, s in items if v is not None]
+        if not items:
+            return None
+        v, s = (max if reverse else min)(items, key=lambda x: x[0])
+        return {'value': v, 'game_id': s['game_id'], 'civ': s['civ'], 'map': s['map'], 'started_at': s['started_at'], 'result': s['result']}
+    records = {
+        'fastest_feudal': best('feudal', [(_age_time(s, 2), s) for s in rows]),
+        'fastest_castle': best('castle', [(_age_time(s, 3), s) for s in rows]),
+        'fastest_imperial': best('imperial', [(_age_time(s, 4), s) for s in rows]),
+        'earliest_2nd_tc': best('tc', [((s['town_centers'] or [None])[0], s) for s in rows]),
+        'most_villagers': best('v', [(s['villagers'], s) for s in vrows], reverse=True),
+        'most_villagers_by_10': best('v10', [(s['villagers_by_10'], s) for s in vrows], reverse=True),
+        'biggest_army': best('m', [(s['military'], s) for s in rows], reverse=True),
+        'highest_apm': best('apm', [(s['apm_replay'], s) for s in rows], reverse=True),
+    }
+    # records that only need the API game list
+    api_rows = [(g, next((p for t in g.get('teams') or [] for x in t for p in [x.get('player', x)] if p['profile_id'] == pid), None)) for g in games if not g.get('ongoing')]
+    api_rows = [(g, p) for g, p in api_rows if p and p.get('result')]
+    longest = max(api_rows, key=lambda gp: gp[0].get('duration') or 0, default=None)
+    streak, best_streak, best_end = 0, 0, None
+    for g, p in reversed(api_rows):  # oldest first
+        if p['result'] == 'win':
+            streak += 1
+            if streak > best_streak:
+                best_streak, best_end = streak, g
+        else:
+            streak = 0
+    upset = None
+    for g, p in api_rows:
+        if p['result'] != 'win' or not p.get('rating'):
+            continue
+        teams_ = [[x.get('player', x) for x in t] for t in g.get('teams') or []]
+        opps = [q for t in teams_ if not any(q['profile_id'] == pid for q in t) for q in t]
+        gap = max((q.get('rating') or 0) for q in opps) - p['rating'] if opps else 0
+        if gap > 0 and (upset is None or gap > upset[0]):
+            upset = (gap, g)
+    api_records = {
+        'longest_game': {'value': longest[0]['duration'], 'game_id': longest[0]['game_id'], 'map': longest[0]['map'], 'started_at': longest[0]['started_at'], 'civ': longest[1].get('civilization'), 'result': longest[1]['result']} if longest else None,
+        'longest_win_streak': {'value': best_streak, 'game_id': best_end['game_id'] if best_end else None, 'started_at': best_end['started_at'] if best_end else None} if best_streak else None,
+        'biggest_upset': {'value': upset[0], 'game_id': upset[1]['game_id'], 'map': upset[1]['map'], 'started_at': upset[1]['started_at']} if upset else None,
+    }
+    remaining = [g for g in finished if str(g['game_id']) not in state['analysed'] and (state['missing'].get(str(g['game_id'])) or {}).get('status') != 'not_found']
+    pending = min(max(0, want - n), len(remaining))
+    return {
+        'profile_id': pid, 'analysed': n, 'candidates': len(finished), 'missing': len(state['missing']), 'want': want, 'pending': pending, 'rate_limited': rate_limited,
+        'tags': tags, 'medians': medians, 'composition': composition, 'records': records, 'api_records': api_records,
+        'games': [{k: s.get(k) for k in ('game_id', 'started_at', 'kind', 'map', 'duration', 'civ', 'result', 'rating_diff', 'villagers_by_10', 'military_by_8', 'apm_replay', 'tags', 'source')} | {'feudal': _age_time(s, 2), 'castle': _age_time(s, 3), 'tcs': len(s['town_centers'] or []) + 1} for s in rows],
+        'updated': time.time(),
     }
 
 
@@ -597,7 +1009,16 @@ if __name__ == '__main__':
         for r in d['games'][:30]:
             print(r['game_id'], r['started_at'][:16], r['kind'], r['map'], r['result'], mmss(r['duration'] or 0), 'R' if r['has_replay'] else '-', 'C' if r['has_counters'] else '-', [t['label'] for t in r['tags']])
     elif cmd == 'analyze':
-        d = game_detail(cfg, int(sys.argv[2]), fetch=True)
+        d = game_detail(cfg, int(sys.argv[2]), fetch=True, profile=sys.argv[3] if len(sys.argv) > 3 else None)
         print(json.dumps(d, indent=1, ensure_ascii=False)[:20000])
+    elif cmd == 'insights':
+        d = game_detail(cfg, int(sys.argv[2]), fetch=True, profile=sys.argv[3] if len(sys.argv) > 3 else None)
+        for i in d['insights']:
+            print(f"[{i['tone']}] {i['text']}")
+    elif cmd == 'profile':
+        d = playstyle_profile(cfg, int(sys.argv[2]), want=int(sys.argv[3]) if len(sys.argv) > 3 else 10)
+        print(json.dumps({k: v for k, v in d.items() if k != 'games'}, indent=1, ensure_ascii=False))
+        for g in d['games']:
+            print(g['game_id'], g['started_at'][:10], g['kind'], g['civ'], g['result'], g['tags'])
     elif cmd == 'scan':
         print(scan_and_analyze(cfg))

@@ -264,10 +264,11 @@ export function flattenTeams(game) {
   // The API nests players as teams[][]{player:{...}} in list endpoints but flat objects in /games/last.
   return (game.teams || []).map(t => t.map(x => x.player ?? x));
 }
-export function gameRow(game, { perspectiveId } = {}) {
+export function gameRow(game, { perspectiveId, summaryLink = true } = {}) {
   const teams = flattenTeams(game);
   const me = perspectiveId ? teams.flat().find(p => p.profile_id === perspectiveId) : null;
   const result = game.ongoing ? 'live' : me?.result ?? null;
+  const summaryFor = perspectiveId ?? teams.flat()[0]?.profile_id;
   const oneVone = teams.length === 2 && teams.every(t => t.length === 1);
 
   const teamsEl = el('div', { class: 'teams' });
@@ -288,7 +289,8 @@ export function gameRow(game, { perspectiveId } = {}) {
     el('div', { class: 'meta' },
       el('span', {}, el('strong', {}, game.map || 'Unknown map'), ' · ', kindName(game.kind)),
       el('span', {}, fmt.duration(game.duration), game.server ? ` · ${game.server}` : ''),
-      diff !== null && diff !== undefined ? el('span', { class: `diff ${diff > 0 ? 'good' : diff < 0 ? 'bad' : ''}` }, fmt.signed(diff), el('span', { class: 'muted' }, ' rating')) : null));
+      diff !== null && diff !== undefined ? el('span', { class: `diff ${diff > 0 ? 'good' : diff < 0 ? 'bad' : ''}` }, fmt.signed(diff), el('span', { class: 'muted' }, ' rating')) : null,
+      summaryLink && !game.ongoing && summaryFor ? el('a', { class: 'summary-link', href: hrefTo(`/game/${game.game_id}`, { p: summaryFor }) }, 'Summary ›') : null));
 }
 
 /* ---------- player search box ---------- */

@@ -1,7 +1,8 @@
 // Profile overview widgets built from a player's recent games: form deltas, activity pattern,
 // calendar, recently played with, rating gained by civ and map, and session grouping.
-import { el, fmt, hrefTo, groupBy, winRate, mean, sum, divergingColor, clamp } from '../util.js';
-import { playerLink, civChip, card, bindTooltip, ttRows, emptyState, flattenTeams, dataTable, wrCell } from '../components.js';
+import { el, fmt, hrefTo, groupBy, winRate, mean, sum, divergingColor, clamp, clear } from '../util.js';
+import { playerLink, civChip, card, bindTooltip, ttRows, emptyState, flattenTeams, dataTable, wrCell, resultPill } from '../components.js';
+import { getJSON, ApiError } from '../api.js';
 import { civName, kindName } from '../constants.js';
 import { gamesFilterFor } from './_shared.js';
 
@@ -177,7 +178,85 @@ export function renderOverview(box, { player, games, modeKey, total }) {
       card('Rating gained', el('div', { class: 'stack' },
         el('div', {}, el('h4', { class: 'muted small', style: { margin: '0 0 6px', textTransform: 'uppercase', letterSpacing: '.05em' } }, 'By civilization'), gains(modeGames, id, g => perspective(g, id).me?.civilization, k => civChip(k, { name: 'short' }), 'Civ')),
         el('div', {}, el('h4', { class: 'muted small', style: { margin: '0 0 6px', textTransform: 'uppercase', letterSpacing: '.05em' } }, 'By map'), gains(modeGames, id, g => g.map, k => el('strong', {}, k), 'Map'))), { level: 3, meta: `${lbKey.replace('_', ' ')} · ${modeGames.length} games` })),
+    el('div', { class: 'grid cols-2', style: { marginTop: '16px' } }, playstyleCard(player), recordsCard(player)),
     el('p', { class: 'muted small', style: { margin: '10px 0 0' } }, `Overview computed in your browser from the ${fmt.int(games.length)} most recent games on record (of ${fmt.int(total)}). Times are shown in your local time zone.`));
+}
+
+/* ---------- playstyle + records (replay-derived, via the local companion) ---------- */
+const ROLE_COLORS = { infantry: 'var(--s1)', ranged: 'var(--s2)', cavalry: 'var(--s3)', siege: 'var(--s4)', naval: 'var(--s7)' };
+const profileCache = new Map();
+function loadProfile(id, want, { force = false } = {}) {
+  const key = `${id}:${want}`;
+  if (!force && profileCache.has(key)) return profileCache.get(key);
+  const p = getJSON(`local/profile/${id}?n=${want}&budget=20`, { ttl: 10 * 60e3, force });
+  profileCache.set(key, p);
+  p.catch(() => profileCache.delete(key));
+  return p;
+}
+const companionMissing = e => !(e instanceof ApiError) || [404, 501, 405].includes(e.status);
+
+function playstyleCard(player) {
+  const id = player.profile_id;
+  const body = el('div', {}, el('p', { class: 'muted small', style: { margin: 0 } }, 'Analysing recent replays…'));
+  const meta = el('span', { class: 'meta' });
+  let want = 10;
+  const run = (force = false) => loadProfile(id, want, { force }).then(d => draw(d)).catch(e => {
+    clear(body);
+    body.append(companionMissing(e) ? el('p', { class: 'muted small', style: { margin: 0 } }, 'Playstyle tags are computed from replays by the local companion (', el('code', {}, 'py -3 server.py'), ').') : el('p', { class: 'bad small', style: { margin: 0 } }, String(e.message || e)));
+  });
+  function draw(d) {
+    clear(body);
+    meta.textContent = `${d.analysed} of the last ${d.candidates} games analysed`;
+    if (!d.analysed) {
+      body.append(el('p', { class: 'muted small', style: { margin: 0 } }, d.rate_limited ? 'The official replay store is rate-limiting downloads right now. ' : 'No replays could be fetched for this player yet. ', d.pending ? el('button', { class: 'linkish', type: 'button', onClick: () => { want = Math.max(want, 10); clear(body); body.append(el('p', { class: 'muted small' }, 'Fetching…')); run(true); } }, 'Try again') : null));
+      return;
+    }
+    const identity = d.tags.filter(t => t.pct >= 30 && !['most_villagers', 'biggest_army', 'fastest_feudal'].includes(t.tag)).slice(0, 6);
+    const rest = d.tags.filter(t => !identity.includes(t)).slice(0, 8);
+    body.append(el('div', { class: 'tags', style: { gap: '6px', marginBottom: '10px' } }, identity.length ? identity.map(t => bindTooltip(el('span', { class: 'tag me', tabindex: 0 }, el('strong', {}, t.label), ` ${t.pct}%`), () => ttRows(t.label, [{ label: 'tagged in', value: `${t.count} of ${d.analysed} games` }]))) : el('span', { class: 'muted small' }, 'No dominant pattern yet (tags below 30%).')));
+    if (rest.length) body.append(el('div', { class: 'tags', style: { gap: '4px', marginBottom: '10px' } }, rest.map(t => bindTooltip(el('span', { class: 'tag', tabindex: 0 }, `${t.label} ${t.pct}%`), () => ttRows(t.label, [{ label: 'tagged in', value: `${t.count} of ${d.analysed} games` }])))));
+    const m = d.medians;
+    const kv = el('dl', { class: 'kv' },
+      el('dt', {}, 'Villagers by 10:00'), el('dd', {}, m.villagers_by_10 === null ? '—' : fmt.int(m.villagers_by_10)),
+      el('dt', {}, 'Feudal · Castle'), el('dd', {}, `${fmt.duration(m.feudal)} · ${fmt.duration(m.castle)}`),
+      el('dt', {}, 'Military by 8:00 · 12:00'), el('dd', {}, `${fmt.int(m.military_by_8)} · ${fmt.int(m.military_by_12)}`),
+      el('dt', {}, 'Town Centers'), el('dd', {}, fmt.dec(m.tcs, 1)),
+      el('dt', {}, 'Military share of spend'), el('dd', {}, fmt.pct(m.mil_share, 0)),
+      el('dt', {}, 'APM (replay)'), el('dd', {}, fmt.int(m.apm)));
+    const comp = Object.entries(d.composition || {});
+    const compBar = comp.length ? el('div', {}, el('div', { class: 'stack', style: { display: 'flex', gap: '2px', height: '12px', marginTop: '4px' } }, comp.map(([r, pct]) => bindTooltip(el('span', { class: 'seg', style: { display: 'block', width: `${pct}%`, background: ROLE_COLORS[r] || 'var(--de-emphasis)', borderRadius: '3px' }, tabindex: 0 }), () => ttRows('Army composition', [{ label: r, value: `${pct}%`, color: ROLE_COLORS[r] }])))),
+      el('div', { class: 'legend', style: { marginTop: '6px' } }, comp.map(([r, pct]) => el('span', { class: 'key' }, el('i', { class: 'rect', style: { '--c': ROLE_COLORS[r] || 'var(--de-emphasis)' } }), `${r} ${pct}%`)))) : null;
+    body.append(el('div', { class: 'grid cols-2', style: { gap: '12px' } }, el('div', {}, el('div', { class: 'muted small', style: { marginBottom: '4px' } }, 'Medians over analysed games'), kv), el('div', {}, el('div', { class: 'muted small' }, 'Army composition (all military queued)'), compBar || emptyState('—'))));
+    const actions = el('div', { style: { display: 'flex', gap: '10px', alignItems: 'center', marginTop: '10px', flexWrap: 'wrap' } });
+    if (d.pending || d.rate_limited) actions.append(el('button', { class: 'btn sm', type: 'button', onClick: e => { e.target.disabled = true; e.target.textContent = 'Fetching…'; want = d.analysed + 10; run(true); } }, d.rate_limited ? 'Store rate-limited — retry' : `Analyse ${Math.min(10, d.pending)} more`));
+    actions.append(el('span', { class: 'muted small' }, `${d.analysed} replays · ${d.missing} unavailable · percentages = share of analysed games with that tag`));
+    body.append(actions);
+  }
+  run();
+  const c = card('Playstyle', body, { level: 3 });
+  c.querySelector('.card-head').append(meta);
+  return c;
+}
+
+function recordsCard(player) {
+  const id = player.profile_id;
+  const body = el('div', {}, el('p', { class: 'muted small', style: { margin: 0 } }, 'Looking for records…'));
+  loadProfile(id, 10).then(d => {
+    clear(body);
+    const R = d.records || {}, A = d.api_records || {};
+    const link = (r, txt) => r?.game_id ? el('a', { href: hrefTo(`/game/${r.game_id}`, { p: id }) }, txt) : txt;
+    const when = r => r?.started_at ? el('span', { class: 'muted small' }, ` · ${fmt.date(r.started_at)}${r.map ? ` · ${r.map}` : ''}`) : null;
+    const rows = [
+      ['Fastest Feudal', R.fastest_feudal, r => fmt.duration(r.value)], ['Fastest Castle', R.fastest_castle, r => fmt.duration(r.value)], ['Fastest Imperial', R.fastest_imperial, r => fmt.duration(r.value)],
+      ['Earliest 2nd Town Center', R.earliest_2nd_tc, r => fmt.duration(r.value)], ['Most villagers by 10:00', R.most_villagers_by_10, r => fmt.int(r.value)],
+      ['Most villagers in a game', R.most_villagers, r => fmt.int(r.value)], ['Biggest army queued', R.biggest_army, r => `${fmt.int(r.value)} units`], ['Highest APM (replay)', R.highest_apm, r => fmt.int(r.value)],
+      ['Longest game', A.longest_game, r => fmt.duration(r.value)], ['Longest win streak', A.longest_win_streak, r => `${r.value} wins`], ['Biggest upset', A.biggest_upset, r => `beat a +${fmt.int(r.value)} opponent`],
+    ].filter(([, r]) => r);
+    if (!rows.length) { body.append(el('p', { class: 'muted small', style: { margin: 0 } }, 'No records yet — records need analysed replays.')); return; }
+    body.append(el('table', { class: 'data compact' }, el('tbody', {}, rows.map(([label, r, f]) => el('tr', {}, el('td', {}, label), el('td', { class: 'num' }, el('strong', {}, link(r, f(r)))), el('td', {}, r.civ ? civChip(r.civ, { name: 'short' }) : null, r.result ? el('span', { style: { marginLeft: '6px' } }, resultPill(r.result)) : null, when(r)))))));
+    body.append(el('p', { class: 'muted small', style: { margin: '8px 0 0' } }, `Replay records over ${d.analysed} analysed games; streak, longest game and upset over the last ${fmt.int(100)} games on record.`));
+  }).catch(e => { clear(body); body.append(el('p', { class: 'muted small', style: { margin: 0 } }, companionMissing(e) ? 'Records need the local companion.' : String(e.message || e))); });
+  return card('Records', body, { level: 3 });
 }
 
 export { kindName, civName };

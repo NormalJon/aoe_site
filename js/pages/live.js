@@ -18,7 +18,12 @@ function liveCard(g) {
     el('div', { class: 'top' }, el('span', {}, el('strong', { style: { color: 'var(--ink)' } }, g.map), ` · ${kindName(g.kind)}`), el('span', {}, g.ongoing ? resultPill('live') : el('span', {}, fmt.duration(g.duration)))),
     el('div', { class: 'teams' }, teams.map((t, i) => [i > 0 ? el('div', { class: 'vs' }, 'vs') : null, el('div', { class: 'team' }, t.map(player))])),
     el('div', { class: 'top' }, el('span', {}, g.server || ''), el('span', {}, g.ongoing ? `started ${fmt.rel(g.started_at)} · ${fmt.duration(elapsed)} elapsed` : `finished ${fmt.rel(g.updated_at)}`),
-      g.average_rating ? el('span', { title: 'average rating' }, `avg ${fmt.int(g.average_rating)}`) : (g.average_mmr ? el('span', { title: 'average hidden MMR' }, `avg MMR ${fmt.int(g.average_mmr)}`) : null)));
+      g.average_rating ? el('span', { title: 'average rating' }, `avg ${fmt.int(g.average_rating)}`) : (g.average_mmr ? el('span', { title: 'average hidden MMR' }, `avg MMR ${fmt.int(g.average_mmr)}`) : null),
+      teams.length === 2 ? el('a', { class: 'small', href: scoutHref(g, teams) }, 'Scout ›') : null));
+}
+export function scoutHref(g, teams) {
+  const lb = g.leaderboard || (String(g.kind).startsWith('rm_') ? (g.kind === 'rm_1v1' ? 'rm_solo' : 'rm_team') : g.kind);
+  return hrefTo('/scout', { mode: lb, a: teams[0].map(p => p.profile_id).join(','), b: teams[1].map(p => p.profile_id).join(',') });
 }
 
 export async function render(app, route) {

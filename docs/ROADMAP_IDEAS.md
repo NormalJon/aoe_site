@@ -91,9 +91,9 @@ Forge's calm density is a feature.
 
 ## 3. Suggested order
 
-1. **Quick wins on the profile (all S):** P1 percentile and career ribbon · P2 last-20 deltas · P3 activity pattern · P4 recently played with · P5 rating per civ and map · P8 sessions · P10 live banner · P11 freshness · P13 Twitch. Together these make the profile feel like op.gg/U.GG in a day or two without new data.
-2. **The differentiators nobody else has for AoE4 (M):** P6 playstyle tags on profiles · M1 key insights · M2 minute timelines · C1 skill radar · C3 lobby scouting · P12 records. All run on the replay pipeline that already exists.
-3. **Infrastructure bets (L):** M4 bracket benchmarks (needs a replay corpus) · L1 rank distribution · X4 follow/notify and X5 AI summaries (need a hosted backend and accounts).
+1. **Quick wins on the profile (all S) — shipped 7 Nov 2026:** P1 percentile and career ribbon · P2 last-20 deltas · P3 activity pattern · P4 recently played with · P5 rating per civ and map · P8 sessions · P10 live banner · P11 freshness · P13 Twitch. Together these make the profile feel like op.gg/U.GG in a day or two without new data.
+2. **The differentiators nobody else has for AoE4 (M) — shipped 8 Nov 2026:** P6 playstyle tags on profiles · M1 key insights · M2 minute timelines · C1 skill radar · C3 lobby scouting · P12 records, plus a **game summary page for any player's game** (`#/game/:id?p=:profile`) with aoe4world-style minute-aligned build orders, unit/building/tech icon strips and resources spent per minute. All run on the replay pipeline (`tools/replays.py`) through the local companion; the official store hands out one replay per player perspective, so the fetcher takes the largest file and re-fetches when a cached copy is much shorter than the game.
+3. **Infrastructure bets (L):** M4 bracket benchmarks (needs a replay corpus) · L1 rank distribution · X4 follow/notify and X5 AI summaries (need a hosted backend and accounts). Also pending from phase 2: civ- and mode-adjusted radar scales, and a replay-fetch queue that respects the store's rate limit instead of stopping at the first 429.
 
 ---
 

@@ -80,7 +80,18 @@ class Handler(SimpleHTTPRequestHandler):
                 local = replays.local_replays(cfg)
                 return self.send_json(200, {"me": cfg.get("me"), "friends": cfg.get("friends") or [], "replay_dirs": dirs,
                                             "local_replays": len(local), "config_error": cfg.get("config_error"),
-                                            "configured": bool(cfg.get("me"))})
+                                            "configured": bool(cfg.get("me")), "companion": True})
+            # --- endpoints that work for any player (no 'me' needed) ---
+            if len(parts) == 2 and parts[0] == "game" and parts[1].isdigit():
+                prof = q.get("profile")
+                if not (prof and prof.isdigit()) and not cfg.get("me"):
+                    return self.send_json(400, {"error": "profile query parameter required"})
+                return self.send_json(200, replays.game_detail(cfg, int(parts[1]), fetch=q.get("fetch") == "1", profile=int(prof) if prof and prof.isdigit() else None))
+            if len(parts) == 2 and parts[0] == "profile" and parts[1].isdigit():
+                want = max(1, min(40, int(q.get("n") or 10)))
+                budget = max(2.0, min(45.0, float(q.get("budget") or 20)))
+                return self.send_json(200, replays.playstyle_profile(cfg, int(parts[1]), want=want, budget=budget, refresh=q.get("refresh") == "1"))
+            # --- endpoints about the configured player ---
             if not cfg.get("me"):
                 return self.send_json(400, {"error": "forge.local.json has no 'me' profile id"})
             if parts == ["games"]:

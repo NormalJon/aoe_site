@@ -90,6 +90,11 @@ Neither API says *what* a player built or *when*. That lives in the replay, a co
   minutes. Download it plainly; the unsigned URLs in `getRecentMatchHistory.matchurls` answer 409
   `PublicAccessNotPermitted`. Several ids per call are fine; bursts of calls get HTTP 429. Retention is uneven:
   some perspectives 404, some older matches return `result.code 2 NOT_FOUND`. Try every listed perspective.
+  **Each entry is one player's upload** (`size` in bytes, `-1` when missing). A player who dropped at 4:00 uploads
+  a replay that ends at 4:00 (verified 8 Nov 2026: a 12:34 4v4 had a 137 KB upload from the dropper and 324 KB
+  from everyone else), so download the largest file and compare its tick length with the API duration. This also
+  means replays exist for *anyone's* games, not just your own — the basis for game summaries and playstyle
+  profiles of arbitrary players.
   (Mechanism confirmed by reading the open-source AoE4-Replay-Launcher, which also keeps a legacy fallback on
   `api.ageofempires.com/api/GameStats/AgeIV/GetMatchReplay`.)
 
