@@ -4,7 +4,7 @@ import { searchBox, avatarImg, countryFlag, rankBadge, modeTabs, civChip, dataTa
 import { lineChart, radarChart } from '../charts.js';
 import { getJSON, ApiError } from '../api.js';
 import { MODE, PROFILE_MODES, modeName, civName, parseRankLevel } from '../constants.js';
-import { fillAsync, ratingHistoryPoints, modesWithData, gamesFilterFor, pageHead } from './_shared.js';
+import { fillAsync, ratingHistoryPoints, modesWithData, gamesFilterFor, pageHead, companionNotice } from './_shared.js';
 
 export async function render(app, route) {
   const a = route.parts[1], b = route.parts[2];
@@ -114,7 +114,7 @@ export async function render(app, route) {
     const vals = p => ({ eco: p.medians?.villagers_by_10, tempo: p.medians?.feudal, aggr: p.medians?.military_by_8, army: p.medians?.military_by_12, expand: p.medians?.tcs, macro: p.medians?.apm });
     radarBox.append(radarChart({ axes, series: [{ name: `${A.name} (${pa.analysed} games)`, color: '--s1', values: vals(pa) }, { name: `${B.name} (${pb.analysed} games)`, color: '--s2', values: vals(pb) }] }));
     radarBox.append(el('p', { class: 'muted small', style: { margin: '8px 0 0' } }, 'Each axis is scaled to a fixed ladder-wide range (shown in the table), so two profiles are comparable and a bigger shape means stronger fundamentals, not just “more than the other player”. Values are medians of order counts from replays; they are not adjusted for civilization or game mode yet.'));
-  }).catch(e => { clear(radarBox); radarBox.append(notice(!(e instanceof ApiError) || [404, 501, 405].includes(e.status) ? 'The skill radar needs the local companion (py -3 server.py), which analyses each player’s recent replays.' : String(e.message || e))); });
+  }).catch(e => { clear(radarBox); radarBox.append(!(e instanceof ApiError) || [404, 501, 405].includes(e.status) ? companionNotice('The skill radar') : notice(String(e.message || e))); });
 
   /* ----- head to head ----- */
   const h2hBox = el('div');

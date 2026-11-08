@@ -4,7 +4,7 @@ import { el, fmt, hrefTo, groupBy, winRate, mean, sum, divergingColor, clamp, cl
 import { playerLink, civChip, card, bindTooltip, ttRows, emptyState, flattenTeams, dataTable, wrCell, resultPill } from '../components.js';
 import { getJSON, ApiError } from '../api.js';
 import { civName, kindName } from '../constants.js';
-import { gamesFilterFor } from './_shared.js';
+import { gamesFilterFor, companionHint } from './_shared.js';
 
 /* ---------- game helpers ---------- */
 export function perspective(game, id) {
@@ -202,7 +202,7 @@ function playstyleCard(player) {
   let want = 10;
   const run = (force = false) => loadProfile(id, want, { force }).then(d => draw(d)).catch(e => {
     clear(body);
-    body.append(companionMissing(e) ? el('p', { class: 'muted small', style: { margin: 0 } }, 'Playstyle tags are computed from replays by the local companion (', el('code', {}, 'py -3 server.py'), ').') : el('p', { class: 'bad small', style: { margin: 0 } }, String(e.message || e)));
+    body.append(companionMissing(e) ? el('p', { class: 'muted small', style: { margin: 0 } }, 'Playstyle tags are computed from replays by the companion server. ', ...companionHint()) : el('p', { class: 'bad small', style: { margin: 0 } }, String(e.message || e)));
   });
   function draw(d) {
     clear(body);
@@ -255,7 +255,7 @@ function recordsCard(player) {
     if (!rows.length) { body.append(el('p', { class: 'muted small', style: { margin: 0 } }, 'No records yet — records need analysed replays.')); return; }
     body.append(el('table', { class: 'data compact' }, el('tbody', {}, rows.map(([label, r, f]) => el('tr', {}, el('td', {}, label), el('td', { class: 'num' }, el('strong', {}, link(r, f(r)))), el('td', {}, r.civ ? civChip(r.civ, { name: 'short' }) : null, r.result ? el('span', { style: { marginLeft: '6px' } }, resultPill(r.result)) : null, when(r)))))));
     body.append(el('p', { class: 'muted small', style: { margin: '8px 0 0' } }, `Replay records over ${d.analysed} analysed games; streak, longest game and upset over the last ${fmt.int(100)} games on record.`));
-  }).catch(e => { clear(body); body.append(el('p', { class: 'muted small', style: { margin: 0 } }, companionMissing(e) ? 'Records need the local companion.' : String(e.message || e))); });
+  }).catch(e => { clear(body); body.append(el('p', { class: 'muted small', style: { margin: 0 } }, companionMissing(e) ? ['Records are computed from replays by the companion server. ', ...companionHint()] : String(e.message || e))); });
   return card('Records', body, { level: 3 });
 }
 

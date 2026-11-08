@@ -5,7 +5,7 @@ import { el, fmt, setTitle, hrefTo, clear, append } from '../util.js';
 import { getJSON, api } from '../api.js';
 import { searchBox, avatarImg, countryFlag, rankBadge, civChip, card, notice, skeleton, errorBox, emptyState, bindTooltip, ttRows, resultPill, playerLink } from '../components.js';
 import { civName, civShort, civFlag } from '../constants.js';
-import { pageHead } from './_shared.js';
+import { pageHead, companionNotice } from './_shared.js';
 
 const AS_KEY = 'forge-cup-as';
 const PHASE = {
@@ -25,7 +25,8 @@ export async function render(app, route) {
   let cfg = null;
   try { cfg = await local('config', { ttl: 60e3, force: false }); } catch (e) {
     clear(holder);
-    holder.append(pageHead('Forge Cup', 'Monthly 1v1 cup in the Clash format.'), notice(el('strong', {}, 'The tournament prototype runs on the local companion. '), 'Start the site with ', el('code', {}, 'py -3 server.py'), ' and open ', el('code', {}, 'http://127.0.0.1:8000/#/tournament'), '. In production this would be a hosted service with Steam sign-in; here the companion stores sign-ups, brackets and drafts in ', el('code', {}, 'cache/tournament.json'), '.'));
+    holder.append(pageHead('Forge Cup', 'Monthly 1v1 cup in the Clash format: sign up, lock in, get a bracket of 8 at your rating, draft maps and civs from a small pool, play best-of-3.'), companionNotice('The Forge Cup'),
+      el('p', { class: 'muted small', style: { marginTop: '10px' } }, 'Sign-ups, brackets and drafts live on the companion server; in production this would be a hosted service with Steam sign-in.'));
     return;
   }
   let as = null;

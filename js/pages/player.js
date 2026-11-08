@@ -4,7 +4,7 @@ import { renderOverview, sessionize, sessionHeader, perspective } from './player
 import { avatarImg, countryFlag, socialLinks, rankBadge, statTile, modeTabs, civChip, dataTable, gameRow, subTabs, select, skeleton, errorBox, emptyState, notice, card, wrCell, divBar, streakEl, segmented, flattenTeams, playerLink, resultPill } from '../components.js';
 import { lineChart, sparkline } from '../charts.js';
 import { PROFILE_MODES, MODE, LB, modeName, civName, kindName, parseRankLevel, RELIC_LEADERBOARD_NAMES, RELIC_MATCHTYPE_NAMES } from '../constants.js';
-import { fillAsync, ratingHistoryPoints, modesWithData, defaultMode, gamesFilterFor } from './_shared.js';
+import { fillAsync, ratingHistoryPoints, modesWithData, defaultMode, gamesFilterFor, companionHint } from './_shared.js';
 
 export async function render(app, route) {
   const id = route.parts[1];
@@ -372,5 +372,5 @@ function renderOfficial(box, player) {
   }, { lines: 10 }).then(r => { if (r === null && !relicAvailable()) { clear(body); body.append(unavailableNotice()); } });
 }
 function unavailableNotice() {
-  return notice(el('strong', {}, 'Official account data needs the local proxy. '), 'The World’s Edge API does not allow browser requests directly. Start the prototype with ', el('code', {}, 'py -3 server.py'), ' and open ', el('code', {}, 'http://127.0.0.1:8000/'), ' to enable this tab. Everything else on the site works without it.');
+  return notice(el('strong', {}, 'Official account data needs the server-side proxy. '), 'The World’s Edge API does not allow browser requests directly, so this tab reads it through server.py. ', ...companionHint(), ' Everything else on the site works without it.');
 }

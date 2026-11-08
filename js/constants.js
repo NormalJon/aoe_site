@@ -1,6 +1,9 @@
 // Static game knowledge: civilizations, leaderboards, rank tiers, official API ids.
 
 export const API_BASE = 'https://aoe4world.com/api/v0';
+// Where the full site (static files + server.py companion) is deployed. Static-only hosts such as GitHub Pages
+// link here from the features that need the companion. Leave empty until a hosted companion exists.
+export const FULL_SITE_URL = '';
 export const RELIC_PROXY = 'relic'; // served by server.py; relative so it works under any mount path
 export const CURRENT_SEASON_FALLBACK = 14;
 

@@ -23,6 +23,10 @@ when set; the Claude desktop launch config in `.claude/launch.json` uses it.
 
 ## Hosting it for others
 
+The static half is live at <https://normaljon.github.io/aoe_site/> (GitHub Pages, redeployed on every push);
+features that need the companion explain themselves there and link to the full site once `FULL_SITE_URL` in
+`js/constants.js` points at a hosted `server.py`.
+
 One Python process is the whole deployment. [docs/HOSTING.md](docs/HOSTING.md) walks through a free Render web
 service (the included `render.yaml` makes it a one-click Blueprint), a Dockerfile for any container host, and
 GitHub Pages for the static half. Set `HOST=0.0.0.0` on a host and `FORGE_ADMIN_KEY` to lock the Cup's demo

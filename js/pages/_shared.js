@@ -1,7 +1,19 @@
 // Helpers shared by page modules.
 import { el, clear, append, countryName } from '../util.js';
-import { skeleton, errorBox } from '../components.js';
-import { PROFILE_MODES, LEADERBOARDS } from '../constants.js';
+import { skeleton, errorBox, notice } from '../components.js';
+import { PROFILE_MODES, LEADERBOARDS, FULL_SITE_URL } from '../constants.js';
+
+/* ---------- companion availability messaging ---------- */
+export const isLocalHost = () => ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) || location.protocol === 'file:';
+/** Inline explanation of why a companion feature is unavailable, worded for the host we are on. */
+export function companionHint() {
+  if (isLocalHost()) return ['Start the site with ', el('code', {}, 'py -3 server.py'), ' and open ', el('code', {}, 'http://127.0.0.1:8000/'), ' to enable it.'];
+  return ['This copy is the static half of Forge; replay analysis, scouting builds and the Cup run on the companion server, which is not part of this deployment. ',
+    FULL_SITE_URL ? el('a', { href: FULL_SITE_URL + location.hash, rel: 'noopener' }, 'Open the full site →') : 'The full site is available where server.py is deployed (see docs/HOSTING.md in the repository).'];
+}
+export function companionNotice(feature) {
+  return notice(el('strong', {}, `${feature} ${isLocalHost() ? 'needs the local companion. ' : 'is not available on this static deployment. '}`), ...companionHint());
+}
 
 /** Show a skeleton, then swap in the rendered result (or an error box). */
 export async function fillAsync(container, load, renderFn, { lines = 5 } = {}) {

@@ -5,7 +5,7 @@ import { el, fmt, setTitle, hrefTo, navigate, clear, mean } from '../util.js';
 import { api, getJSON } from '../api.js';
 import { playerLink, civChip, rankBadge, select, card, skeleton, errorBox, emptyState, bindTooltip, ttRows, statTile, streakEl, resultPill, barList } from '../components.js';
 import { LEADERBOARDS, civName, civShort, CIVS, CHART_SERIES } from '../constants.js';
-import { pageHead } from './_shared.js';
+import { pageHead, companionHint } from './_shared.js';
 
 const MODES = LEADERBOARDS.map(l => ({ value: l.key, label: l.name }));
 const lines = s => s.split(/\n/).map(x => x.trim()).filter(Boolean).slice(0, 4);
@@ -143,7 +143,7 @@ function civScout(p, civs, route) {
     if (!civ) return;
     panel.append(el('div', { class: 'muted small' }, `Pulling ${p.name}'s recent ${civName(civ)} replays from the official store…`), skeleton(3));
     getJSON(`local/profile/${pid}?civ=${civ}&n=${want}&budget=15`, { ttl: 10 * 60e3, force }).then(d => { if (!panel.isConnected) return; clear(panel); panel.append(civPanel(p, civ, d, () => { want = d.analysed + 6; drawPanel(true); })); })
-      .catch(e => { clear(panel); panel.append(el('p', { class: 'muted small', style: { margin: 0 } }, e?.status === 404 || !e?.status ? 'Build scouting needs the local companion (py -3 server.py).' : String(e.message || e))); });
+      .catch(e => { clear(panel); panel.append(el('p', { class: 'muted small', style: { margin: 0 } }, e?.status === 404 || !e?.status ? ['Build scouting needs the companion server. ', ...companionHint()] : String(e.message || e))); });
   }
   drawPanel();
   return wrap;

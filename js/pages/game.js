@@ -7,7 +7,7 @@ import { getJSON, api, ApiError } from '../api.js';
 import { civChip, playerLink, resultPill, dataTable, select, card, notice, skeleton, errorBox, emptyState, bindTooltip, ttRows, segmented, flattenTeams } from '../components.js';
 import { civName, kindName, CHART_SERIES } from '../constants.js';
 import { lineChart } from '../charts.js';
-import { pageHead } from './_shared.js';
+import { pageHead, companionHint } from './_shared.js';
 
 const RES_COLORS = { food: 'var(--s2)', wood: 'var(--s3)', gold: 'var(--s4)', stone: 'var(--muted)' };
 const ROLE_COLORS = { infantry: 'var(--s1)', ranged: 'var(--s2)', cavalry: 'var(--s3)', siege: 'var(--s4)', naval: 'var(--s7)', other: 'var(--de-emphasis)' };
@@ -69,7 +69,7 @@ function renderGame(holder, d, { gameId, profile, companion, route }) {
   holder.append(el('div', { class: 'notice', style: { marginBottom: '16px' } },
     d.replay.available ? el('span', {}, el('strong', {}, 'Replay: '), `${d.replay.status === 'local' ? 'local game file' : d.replay.status === 'cached' ? 'official store (cached copy)' : 'official store'} (game build ${d.replay.build}) — every unit queued, building placed and technology researched, for every player. `)
       : el('span', {}, el('strong', {}, 'No replay for this game'), d.replay.status ? ` (${String(d.replay.status).replace('_', ' ')}). ` : '. ',
-        companion ? 'The official store keeps replays for a limited time; local files are picked up automatically. ' : el('span', {}, 'Start the companion with ', el('code', {}, 'py -3 server.py'), ' to fetch replays and see build orders. ')),
+        companion ? 'The official store keeps replays for a limited time; local files are picked up automatically. ' : el('span', {}, 'Build orders, icon strips and timelines need the companion. ', ...companionHint(), ' ')),
     d.counters_available ? el('span', {}, el('strong', {}, 'Official counters: '), 'kills, losses, buildings, upgrades and APM from the game servers.') : el('span', {}, el('strong', {}, 'No official counters: '), 'this game is outside the recent-match window of the official API.')));
 
   /* key insights */

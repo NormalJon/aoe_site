@@ -3,7 +3,7 @@ import { el, fmt, setTitle, hrefTo, navigate, clear, append, sum } from '../util
 import { getJSON, ApiError } from '../api.js';
 import { civChip, resultPill, dataTable, select, notice, skeleton, errorBox, statTile } from '../components.js';
 import { civName, kindName } from '../constants.js';
-import { pageHead } from './_shared.js';
+import { pageHead, companionNotice } from './_shared.js';
 import * as gamePage from './game.js';
 import { tagChip } from './game.js';
 
@@ -15,7 +15,7 @@ export async function render(app, route) {
   setTitle('My games');
   let cfg;
   try { cfg = await local('config'); } catch (e) {
-    app.append(pageHead('My games'), notice(el('strong', {}, 'This page needs the local companion. '), 'Start the site with ', el('code', {}, 'py -3 server.py'), ' and open ', el('code', {}, 'http://127.0.0.1:8000/'), '. The companion reads replays from your Age of Empires IV folder, so it only runs on your own machine.'));
+    app.append(pageHead('My games'), companionNotice('My games'), el('p', { class: 'muted small', style: { marginTop: '10px' } }, 'My games reads replays from the Age of Empires IV folder of the machine running the companion, so it is personal to that machine even on the full site.'));
     return;
   }
   if (!cfg.configured) {
