@@ -1,0 +1,18 @@
+# Render Blueprint: one web service running server.py (static site + Relic proxy + companion).
+# Deploy: https://render.com → New → Blueprint → pick this repository → Apply.
+services:
+  - type: web
+    name: forge-aoe4
+    runtime: python
+    plan: free                      # sleeps after ~15 min idle; first request then takes ~30-60 s
+    buildCommand: pip install -r requirements.txt
+    startCommand: python server.py
+    autoDeploy: true                # every push to main redeploys
+    healthCheckPath: /local/config
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: HOST
+        value: 0.0.0.0
+      - key: FORGE_ADMIN_KEY        # protects the Cup's demo controls; read it in the service's Environment tab
+        generateValue: true

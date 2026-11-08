@@ -21,6 +21,13 @@ Any other static server works too (`py -3 -m http.server`, nginx, GitHub Pagesâ€
 without the proxy, only the Official data tab degrades to an explanatory notice. `PORT` is honoured
 when set; the Claude desktop launch config in `.claude/launch.json` uses it.
 
+## Hosting it for others
+
+One Python process is the whole deployment. [docs/HOSTING.md](docs/HOSTING.md) walks through a free Render web
+service (the included `render.yaml` makes it a one-click Blueprint), a Dockerfile for any container host, and
+GitHub Pages for the static half. Set `HOST=0.0.0.0` on a host and `FORGE_ADMIN_KEY` to lock the Cup's demo
+controls; `/cache/` and `forge.local.json` are never served.
+
 ## What's in the prototype
 
 | Route | Page | Highlights |

@@ -1,0 +1,2 @@
+# Forge has no third-party Python dependencies; the server and companion use the standard library only.
+# This file exists so hosting platforms that run `pip install -r requirements.txt` succeed.

@@ -34,10 +34,14 @@ export async function render(app, route) {
   const ui = { as, selectedBracket: route.query.bracket || null, selectedMatch: route.query.match || null, actForBoth: false, civSel: null, slotSel: null, busy: false, error: null, clockTimer: null };
   let state = null;
 
+  const KEY_KEY = 'forge-cup-key';
+  const adminKey = () => { try { return localStorage.getItem(KEY_KEY) || ''; } catch { return ''; } };
   const post = async (action, body = {}) => {
     ui.busy = true; ui.error = null;
     try {
-      const res = await fetch(`local/tournament/${action}?${new URLSearchParams(ui.as ? { as: ui.as } : {})}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const params = new URLSearchParams(ui.as ? { as: ui.as } : {});
+      if (adminKey()) params.set('key', adminKey());
+      const res = await fetch(`local/tournament/${action}?${params}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `${res.status}`);
       state = data;
@@ -307,8 +311,11 @@ export async function render(app, route) {
     function demoCard() {
       const mine = me;
       const btn = (label, fn, opts = {}) => el('button', { class: `btn sm ${opts.primary ? 'primary' : ''}`, type: 'button', disabled: ui.busy || opts.disabled ? true : null, title: opts.title, onClick: fn }, label);
+      const keyInput = el('input', { type: 'password', placeholder: 'Admin key', value: adminKey(), 'aria-label': 'Admin key', style: { height: '30px', padding: '0 8px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--ink)', width: '180px' } });
       return card('Prototype controls', el('div', { class: 'stack' },
         el('p', { class: 'muted small', style: { margin: 0 } }, 'These exist so the whole month can be walked through today. Demo entrants are real ladder profiles near your rating with their actual most-played civs as declared pools; they are not really registered.'),
+        cfg.admin_required ? el('div', { style: { display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' } }, el('span', { class: 'muted small' }, 'This deployment locks the clock, demo entrants, bracket rebuild and reset behind an admin key:'), keyInput,
+          el('button', { class: 'btn sm', type: 'button', onClick: () => { try { localStorage.setItem(KEY_KEY, keyInput.value.trim()); } catch { /* ignore */ } ui.error = null; draw(); } }, 'Save key'), adminKey() ? el('span', { class: 'badge ok' }, 'key saved') : null) : null,
         el('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' } },
           btn('Add 7 demo entrants near my rating', () => post('seed_demo', { profile_id: mine.profile_id, n: 7 }), { disabled: !mine, title: mine ? '' : 'sign up first' }),
           el('span', { class: 'muted small' }, 'Clock:'),

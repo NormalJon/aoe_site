@@ -25,6 +25,10 @@ import urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get("PORT", "8000"))
+HOST = os.environ.get("HOST", "127.0.0.1")            # hosting platforms set HOST=0.0.0.0
+ADMIN_KEY = os.environ.get("FORGE_ADMIN_KEY", "")     # when set, tournament demo controls need ?key=<it>
+ADMIN_ACTIONS = {"reset", "clock", "seed_demo", "form_brackets"}
+PRIVATE_PREFIXES = ("/cache/", "/forge.local.json", "/.git")
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
 from tools import replays, tournament  # noqa: E402
@@ -66,6 +70,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self.proxy()
         if self.path.startswith("/local/"):
             return self.local()
+        if self.path.startswith(PRIVATE_PREFIXES):
+            return self.send_json(404, {"error": "not found"})
         return super().do_GET()
 
     def do_POST(self):
@@ -73,6 +79,8 @@ class Handler(SimpleHTTPRequestHandler):
         parts = [p for p in parsed.path.split("/") if p]
         q = dict(urllib.parse.parse_qsl(parsed.query))
         if len(parts) == 3 and parts[:2] == ["local", "tournament"]:
+            if parts[2] in ADMIN_ACTIONS and ADMIN_KEY and q.get("key") != ADMIN_KEY:
+                return self.send_json(403, {"error": "this demo control needs the admin key (Prototype controls → Admin key)"})
             try:
                 n = int(self.headers.get("Content-Length") or 0)
                 body = json.loads(self.rfile.read(n) or b"{}") if n else {}
@@ -99,7 +107,8 @@ class Handler(SimpleHTTPRequestHandler):
                 local = replays.local_replays(cfg)
                 return self.send_json(200, {"me": cfg.get("me"), "friends": cfg.get("friends") or [], "replay_dirs": dirs,
                                             "local_replays": len(local), "config_error": cfg.get("config_error"),
-                                            "configured": bool(cfg.get("me")), "companion": True})
+                                            "configured": bool(cfg.get("me")), "companion": True, "admin_required": bool(ADMIN_KEY),
+                                            "hosted": HOST not in ("127.0.0.1", "localhost")})
             # --- endpoints that work for any player (no 'me' needed) ---
             if parts == ["tournament", "state"]:
                 as_pid = int(q["as"]) if q.get("as", "").isdigit() else None
@@ -191,10 +200,10 @@ def main():
             stream.reconfigure(encoding="utf-8", errors="replace")
         except Exception:  # noqa: BLE001
             pass
-    httpd = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
+    httpd = ThreadingHTTPServer((HOST, PORT), Handler)
     cfg = replays.load_config()
-    print(f"Forge dev server -> http://127.0.0.1:{PORT}/  (Relic proxy at /relic/..., local companion at /local/...)")
-    print(f"Local companion: me={cfg.get('me')} friends={len(cfg.get('friends') or [])} replay dirs={len(replays.replay_dirs(cfg))}")
+    print(f"Forge server -> http://{'127.0.0.1' if HOST == '0.0.0.0' else HOST}:{PORT}/  (bound to {HOST}; Relic proxy at /relic/..., companion at /local/...)")
+    print(f"Companion: me={cfg.get('me')} friends={len(cfg.get('friends') or [])} replay dirs={len(replays.replay_dirs(cfg))} admin key={'set' if ADMIN_KEY else 'not set (demo controls open to everyone)'}")
     print("Press Ctrl+C to stop.")
     try:
         httpd.serve_forever()
