@@ -19,11 +19,7 @@ function liveCard(g) {
     el('div', { class: 'teams' }, teams.map((t, i) => [i > 0 ? el('div', { class: 'vs' }, 'vs') : null, el('div', { class: 'team' }, t.map(player))])),
     el('div', { class: 'top' }, el('span', {}, g.server || ''), el('span', {}, g.ongoing ? `started ${fmt.rel(g.started_at)} · ${fmt.duration(elapsed)} elapsed` : `finished ${fmt.rel(g.updated_at)}`),
       g.average_rating ? el('span', { title: 'average rating' }, `avg ${fmt.int(g.average_rating)}`) : (g.average_mmr ? el('span', { title: 'average hidden MMR' }, `avg MMR ${fmt.int(g.average_mmr)}`) : null),
-      teams.length === 2 ? el('a', { class: 'small', href: scoutHref(g, teams) }, 'Scout ›') : null));
-}
-export function scoutHref(g, teams) {
-  const lb = g.leaderboard || (String(g.kind).startsWith('rm_') ? (g.kind === 'rm_1v1' ? 'rm_solo' : 'rm_team') : g.kind);
-  return hrefTo('/scout', { mode: lb, a: teams[0].map(p => p.profile_id).join(','), b: teams[1].map(p => p.profile_id).join(',') });
+      g.ongoing && teams[0]?.[0] ? el('a', { class: 'small', href: hrefTo(`/player/${teams[0][0].profile_id}`), title: `Open ${teams[0][0].name}'s profile: the live game panel shows this game with intel on the opponents` }, 'Live view ›') : null));
 }
 
 export async function render(app, route) {
@@ -74,6 +70,6 @@ export async function render(app, route) {
   refreshBtn.addEventListener('click', load);
   autoBtn.addEventListener('click', () => { auto = !auto; autoBtn.textContent = auto ? 'Auto-refresh: on' : 'Auto-refresh: off'; autoBtn.setAttribute('aria-pressed', String(auto)); schedule(); });
   await load(); schedule();
-  app.append(el('p', { class: 'muted small', style: { marginTop: '14px' } }, 'The feed samples the 50 most recently started and 50 most recently updated games; ratings appear once the game is rated.'));
+  app.append(el('p', { class: 'muted small', style: { marginTop: '14px' } }, 'The feed samples the 50 most recently started and 50 most recently updated games; ratings appear once the game is rated. "Live view" opens a player’s profile, whose live game panel shows the match with intel on the opponents.'));
   return () => clearInterval(timer);
 }

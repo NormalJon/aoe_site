@@ -831,7 +831,10 @@ def game_detail(cfg, game_id, fetch=False, profile=None):
 # ----------------------------------------------------------------------------- playstyle profile (any player)
 
 PROFILE_FIELDS = ('villagers', 'villagers_by_10', 'military', 'military_by_6', 'military_by_8', 'military_by_10', 'military_by_12', 'town_centers', 'ages',
-                  'apm_replay', 'commands', 'first_military', 'spend_total', 'spend_military', 'defense_total', 'by_role', 'military_by_unit', 'last_villager', 'villager_gap')
+                  'apm_replay', 'commands', 'first_military', 'spend_total', 'spend_military', 'defense_total', 'defense_by_12', 'by_role', 'military_by_unit', 'last_villager', 'villager_gap',
+                  'traders', 'monks')
+SUMMARY_V = 2                     # bump when _summarize gains fields; older stored summaries are rebuilt from the cached analysis
+MIL_ROLE_SET = {'cavalry', 'ranged', 'infantry', 'siege', 'naval', 'other'}
 
 
 def _median(xs):
@@ -854,12 +857,242 @@ def _summarize(rp, g, me, a, status):
     early = Counter(x['name'] for x in rp.get('build_order') or [] if x['time'] < 300)
     first_mil_b = next((x for x in rp.get('build_order') or [] if any(w in x['name'].lower() for w in MIL_BUILDINGS)), None)
     s = {k: rp.get(k) for k in PROFILE_FIELDS}
+    # what happened before the age-ups: military queued in the Dark Age (the "Dark Age spearman" tell), military
+    # queued in Feudal, buildings placed before Feudal, the first technologies, and whether Castle came before any army
+    feudal_t, castle_t = _age_time(rp, 2), _age_time(rp, 3)
+    bps = {str(k): v for k, v in (a.get('blueprints') or {}).items()}
+    da_units, da_first, feudal_mil = Counter(), None, 0
+    for e in rp.get('events') or []:
+        if e.get('k') != 'train':
+            continue
+        b = bps.get(str(e.get('id')))
+        if not b or b.get('role') not in MIL_ROLE_SET:
+            continue
+        t, cnt = e['t'], e.get('n', 1)
+        if feudal_t is None or t < feudal_t:
+            da_units[b['name']] += cnt
+            if da_first is None:
+                da_first = {'t': t, 'name': b['name']}
+        elif castle_t is None or t < castle_t:
+            feudal_mil += cnt
+    first_mil = rp.get('first_military')
     s.update({'game_id': g['game_id'], 'started_at': g['started_at'], 'kind': g['kind'], 'map': g['map'], 'duration': dur,
               'civ': me.get('civilization'), 'result': me.get('result'), 'rating_diff': me.get('rating_diff'), 'source': status,
               'tags': [t['tag'] for t in tags], 'tag_labels': {t['tag']: t['label'] for t in tags},
               'opening': opening, 'early_buildings': dict(early), 'landmarks': rp.get('landmarks') or [],
-              'first_military_building': {'time': first_mil_b['time'], 'name': first_mil_b['name']} if first_mil_b else None})
+              'first_military_building': {'time': first_mil_b['time'], 'name': first_mil_b['name']} if first_mil_b else None,
+              'v': SUMMARY_V,
+              'dark_age_military': {'count': sum(da_units.values()), 'units': dict(da_units.most_common()), 'first': da_first} if da_units else None,
+              'feudal_military': feudal_mil,
+              'castle_first': bool(castle_t is not None and (first_mil is None or first_mil['time'] > castle_t)),
+              'pre_feudal_buildings': dict(Counter(x['name'] for x in rp.get('build_order') or [] if feudal_t is None or x['time'] < feudal_t)),
+              'first_techs': [{'t': round(x['time'], 1), 'name': x['name']} for x in (rp.get('research') or [])[:6]]})
     return s
+
+
+# ----------------------------------------------------------------------------- intel: AoE-specific tells
+
+DARK_AGE_TELL_BUILDINGS = ('Barracks', 'Archery Range', 'Stable', 'Dock', 'Outpost', 'Siege Workshop', 'Military School', 'Keep', 'Palisade Wall', 'Stone Wall')
+OPENING_SKIP = ('House', 'Longhouse', 'Tower House', 'Ger', 'Palisade', 'Stone Wall', 'Farm', 'Pasture')   # placed in varying numbers; ignored when comparing openings
+PRELATE_CIVS = {'holy_roman_empire', 'order_of_the_dragon'}   # their religious units are economic, so monk counts are not a tell
+
+
+def intel(rows):
+    """How a player pilots (optionally one civ), as explainable tells over per-game replay summaries.
+    Each tell carries the rule's count over the analysed games so the UI can show "4 of 5" next to the claim."""
+    n = len(rows)
+    if not n:
+        return []
+    out = []
+
+    def add(key, kind, label, text, count, **extra):
+        out.append({'key': key, 'kind': kind, 'label': label, 'text': text, 'count': count, 'n': n, 'pct': round(100 * count / n), **extra})
+
+    def feudal(s):
+        return _age_time(s, 2)
+
+    def castle(s):
+        return _age_time(s, 3)
+
+    def t_or_dash(t):
+        return mmss(t) if t is not None else '—'
+
+    def an(word):
+        return f"an {word}" if word[:1].lower() in 'aeiou' else f"a {word}"
+
+    base = Blueprints.base_name   # "Early Hirdman" -> "Hirdman"
+
+    # Dark Age military ("Dark Age spearman"): v2 summaries carry every unit; older ones only know the first military unit
+    da = []
+    for s in rows:
+        d = s.get('dark_age_military')
+        if d is None and not s.get('v'):
+            fm, f = s.get('first_military'), feudal(s)
+            if fm and (f is None or fm['time'] < f):
+                d = {'count': 1, 'units': {fm['name']: 1}, 'first': {'t': fm['time'], 'name': fm['name']}}
+        if d and d.get('count'):
+            da.append(d)
+    da_unit = None
+    if da:
+        units = Counter()
+        for d in da:
+            for name, c in (d.get('units') or {}).items():
+                units[base(name)] += c
+        da_unit = units.most_common(1)[0][0]
+        first = _median([d['first']['t'] for d in da if d.get('first')])
+        per_game = _median([d['count'] for d in da]) or 0
+        add('dark_age_military', 'aggression', f'Dark Age {da_unit}',
+            f"queues military before aging up in {len(da)} of {n} games, mostly {da_unit}: first one at {t_or_dash(first)} (median), about {per_game:.0f} units before Feudal",
+            len(da), unit=da_unit, first=first)
+    # Dark Age military / defensive buildings
+    pre = Counter()
+    for s in rows:
+        pb = s.get('pre_feudal_buildings')
+        if pb is None:
+            f = feudal(s)
+            pb = Counter(x['name'] for x in s.get('opening') or [] if x.get('k') == 'build' and (f is None or x['t'] < f))
+        for name in pb:
+            if any(name.startswith(w) for w in DARK_AGE_TELL_BUILDINGS):
+                pre[name] += 1
+    da_buildings = set()
+    for name, c in pre.most_common(3):
+        if c >= 2 or c == n:
+            da_buildings.add(name)
+            defensive = name in ('Outpost', 'Keep') or 'Wall' in name
+            add(f'dark_age_building:{name}', 'defense' if defensive else 'aggression', f'Dark Age {name}', f"places {an(name)} before Feudal in {c} of {n} games", c, building=name)
+    # Age-up tempo
+    # age-up times are landmark *placements* (the replay records the order), roughly a minute before the age completes
+    f_times = [feudal(s) for s in rows if feudal(s) is not None]
+    if f_times:
+        med_f = _median(f_times)
+        fast = [t for t in f_times if t < 195]
+        if fast:
+            add('fast_feudal', 'tempo', f'Fast Feudal · {mmss(med_f)}', f"Feudal landmark placed before 3:15 in {len(fast)} of {len(f_times)} games that aged up; median placement {mmss(med_f)}", len(fast), median=med_f)
+        late = [t for t in f_times if t > 330]
+        if late and len(late) * 2 >= len(f_times):
+            add('long_dark_age', 'tempo', f'Long Dark Age · {mmss(med_f)}', f"Feudal landmark placed after 5:30 in {len(late)} of {len(f_times)} games that aged up; median placement {mmss(med_f)}", len(late), median=med_f)
+    c_rows = [s for s in rows if castle(s) is not None]
+    if c_rows:
+        c_times = [castle(s) for s in c_rows]
+        med_c = _median(c_times)
+        fast_c = [s for s in c_rows if castle(s) < 480]
+        if fast_c:
+            def _pure(s):
+                if s.get('v'):
+                    return bool(s.get('castle_first'))
+                fm = s.get('first_military')
+                return fm is None or fm['time'] > castle(s)
+            pure = sum(1 for s in fast_c if _pure(s))
+            add('fast_castle', 'tempo', f'Fast Castle · {mmss(med_c)}',
+                f"Castle landmark placed before 8:00 in {len(fast_c)} of {n} games; median placement {mmss(med_c)}" + (f"; {pure} of them with no military unit queued before Castle" if pure else ''),
+                len(fast_c), median=med_c, pure=pure)
+    long_games = [s for s in rows if (s.get('duration') or 0) >= 900]
+    if long_games:
+        camp = [s for s in long_games if castle(s) is None or castle(s) > 840]
+        if camp and len(camp) * 2 >= len(long_games):
+            add('long_feudal', 'tempo', 'Long Feudal', f"no Castle landmark before 14:00 in {len(camp)} of {len(long_games)} games lasting 15 minutes or more: expect a Feudal all-in or a long Feudal fight", len(camp))
+    # Feudal pressure vs boom
+    m8 = [s.get('military_by_8') for s in rows if s.get('military_by_8') is not None]
+    press = [v for v in m8 if v >= 6]
+    if press:
+        add('feudal_pressure', 'aggression', 'Feudal pressure', f"6 or more military units by 8:00 in {len(press)} of {n} games ({_median(press):.0f} units, median)", len(press), median=_median(press))
+    boom = [v for v in m8 if v == 0]
+    if boom:
+        add('boom', 'economy', 'Boomer', f"no military unit queued before 8:00 in {len(boom)} of {n} games", len(boom))
+    # Expansion
+    two = [s for s in rows if s.get('town_centers')]
+    if two:
+        t2 = _median([s['town_centers'][0] for s in two])
+        three = sum(1 for s in two if len(s['town_centers']) >= 2)
+        label = 'Always 2 TC' if len(two) == n and n >= 2 else f'2nd TC in {round(100 * len(two) / n)}%'
+        add('second_tc', 'economy', label, f"second Town Center in {len(two)} of {n} games, placed at {mmss(t2)} (median)" + (f"; a third TC in {three}" if three else ''), len(two), median=t2, three=three)
+    elif n >= 2 and (_median([s.get('duration') or 0 for s in rows]) or 0) >= 900:
+        add('one_tc', 'economy', 'One TC', f"no second Town Center in any of {n} games (median length {mmss(_median([s.get('duration') or 0 for s in rows]))})", n)
+    # Landmark choices
+    for age, key, word in ((2, 'feudal_landmark', 'Feudal'), (3, 'castle_landmark', 'Castle')):
+        via = Counter(next((a_['via'] for a_ in s.get('ages') or [] if a_['age'] == age), None) for s in rows)
+        via.pop(None, None)
+        if via:
+            name, c = via.most_common(1)[0]
+            tot = sum(via.values())
+            if c >= 2 or c == n:
+                others = ', '.join(k for k, _ in via.most_common()[1:3])
+                add(key, 'tempo', f'{word} via {name}', f"ages up to {word} through {name} in {c} of {tot} games that reached it" + (f" (otherwise {others})" if others else ''), c, landmark=name)
+    # First military building / unit
+    fb = Counter((s.get('first_military_building') or {}).get('name') for s in rows)
+    fb.pop(None, None)
+    if fb:
+        name, c = fb.most_common(1)[0]
+        if (c >= 2 or c == n) and name not in da_buildings:
+            t = _median([(s.get('first_military_building') or {}).get('time') for s in rows if (s.get('first_military_building') or {}).get('name') == name])
+            add('first_military_building', 'aggression', f'Opens {name}', f"first military building is {an(name)} in {c} of {n} games, placed at {t_or_dash(t)} (median)", c, building=name, median=t)
+    fu = Counter(base((s.get('first_military') or {}).get('name') or '') for s in rows)
+    fu.pop('', None)
+    if fu:
+        name, c = fu.most_common(1)[0]
+        if (c >= 2 or c == n) and name != da_unit:
+            t = _median([(s.get('first_military') or {}).get('time') for s in rows if base((s.get('first_military') or {}).get('name') or '') == name])
+            add('first_unit', 'aggression', f'First unit: {name}', f"first military unit queued is {an(name)} in {c} of {n} games, at {t_or_dash(t)} (median)", c, unit=name, median=t)
+    # Army identity
+    mix = Counter()
+    for s in rows:
+        mix.update(s.get('military_by_unit') or {})
+    tot = sum(mix.values())
+    if tot >= 20:
+        unit, c = mix.most_common(1)[0]
+        share = 100 * c / tot
+        if share >= 45:
+            games_top = sum(1 for s in rows if (s.get('military_by_unit') or {}) and max(s['military_by_unit'].items(), key=lambda kv: kv[1])[0] == unit)
+            others = ', '.join(f"{u} {100 * k / tot:.0f}%" for u, k in mix.most_common(3)[1:])
+            add('mass_unit', 'army', f'Mass {unit}', f"{share:.0f}% of all military queued across the analysed games is {unit}" + (f"; then {others}" if others else ''), games_top, unit=unit, share=round(share))
+    # Defence
+    turtle = [s.get('defense_by_12') for s in rows if (s.get('defense_by_12') or 0) >= 4]
+    if turtle:
+        add('turtle', 'defense', 'Turtle', f"{_median(turtle):.0f} towers, walls, gates or keeps placed by 12:00 (median) in {len(turtle)} of {n} games", len(turtle))
+    # Early technologies
+    techs = Counter()
+    for s in rows:
+        names = [x['name'] for x in (s.get('first_techs') or [])] or [x['name'] for x in s.get('opening') or [] if x.get('k') == 'research'][:6]
+        techs.update(set(k for k in names if not k.endswith(' Wing')))
+    top = [(k, c) for k, c in techs.most_common(5) if c >= 2 or c == n][:3]
+    if top:
+        add('early_techs', 'tech', 'Early techs: ' + ', '.join(k for k, _ in top), 'first technologies researched: ' + ', '.join(f"{k} in {c} of {n}" for k, c in top), top[0][1], techs=[{'name': k, 'games': c} for k, c in top])
+    # Does the opening change? Only meaningful within one civilization.
+    seqs = []
+    if len({s.get('civ') for s in rows}) == 1:
+        for s in rows:
+            seq = [x['name'] for x in s.get('opening') or [] if x.get('k') == 'build' and not any(x['name'] == w or x['name'].startswith(w + ' ') for w in OPENING_SKIP)][:4]
+            if len(seq) >= 3:
+                seqs.append(tuple(seq))
+    if len(seqs) >= 3:
+        (seq, c), = Counter(seqs).most_common(1)
+        if c / len(seqs) >= 0.6:
+            add('scripted', 'habit', 'Scripted opening', f"same first buildings ({' → '.join(seq)}) in {c} of {len(seqs)} games (houses, farms and walls ignored)", c, sequence=list(seq))
+    # Game length preference
+    short = [s for s in rows if (s.get('duration') or 0) < 900 and s.get('result') in ('win', 'loss')]
+    long_ = [s for s in rows if (s.get('duration') or 0) >= 1500 and s.get('result') in ('win', 'loss')]
+    if len(short) >= 2 and len(long_) >= 2:
+        ws = sum(1 for s in short if s['result'] == 'win')
+        wl = sum(1 for s in long_ if s['result'] == 'win')
+        rs, rl = 100 * ws / len(short), 100 * wl / len(long_)
+        if rs - rl >= 30:
+            add('wins_short', 'habit', 'Wins short games', f"{ws}–{len(short) - ws} in games under 15 minutes, {wl}–{len(long_) - wl} past 25 minutes: drag it out", len(short))
+        elif rl - rs >= 30:
+            add('wins_long', 'habit', 'Wins long games', f"{wl}–{len(long_) - wl} past 25 minutes, {ws}–{len(short) - ws} under 15: end it early", len(long_))
+    late = [s for s in rows if (s.get('duration') or 0) >= 1200]
+    if late:
+        imp = [s for s in late if _age_time(s, 4) is not None]
+        if imp and len(imp) * 2 >= len(late):
+            add('imperial', 'tempo', 'Goes Imperial', f"reaches Imperial in {len(imp)} of {len(late)} games longer than 20 minutes (median {mmss(_median([_age_time(s, 4) for s in imp]))})", len(imp))
+    # Trade, monks, water
+    for role, thresh, key, label, word, kind in (('trader', 5, 'trade', 'Trades', 'traders', 'economy'), ('monk', 3, 'monks', 'Monk play', 'religious units', 'army'), ('naval', 5, 'navy', 'Goes to water', 'ships', 'army')):
+        pool = [s for s in rows if role != 'monk' or s.get('civ') not in PRELATE_CIVS]
+        hit = [(s.get('by_role') or {}).get(role, 0) for s in pool if (s.get('by_role') or {}).get(role, 0) >= thresh]
+        if hit:
+            add(key, kind, label, f"{_median(hit):.0f} {word} (median) in {len(hit)} of {n} games", len(hit))
+    out = [t for t in out if t['pct'] >= 40 or t['count'] >= 3]
+    out.sort(key=lambda t: (-t['pct'], -t['count']))
+    return out[:12]
 
 
 def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False, civ=None):
@@ -883,7 +1116,7 @@ def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False, civ=None):
     # stored summaries written before newer fields existed are rebuilt from the (cached) analysis
     by_id = {str(g['game_id']): g for g in games}
     for gid, s in list(state['analysed'].items()):
-        if 'opening' in s or gid not in by_id or not local.get(int(gid)):
+        if (s.get('v') or 0) >= SUMMARY_V or gid not in by_id or not local.get(int(gid)):
             continue
         try:
             a = analyze_replay(local[int(gid)])
@@ -1020,7 +1253,7 @@ def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False, civ=None):
     early_buildings = [{'name': b, 'per_game': round(c / n, 1), 'games': sum(1 for s in rows if b in (s.get('early_buildings') or {}))} for b, c in early_tot.most_common(10)] if n else []
     feudal_via = Counter(next((a_['via'] for a_ in s.get('ages') or [] if a_['age'] == 2), None) for s in rows)
     castle_via = Counter(next((a_['via'] for a_ in s.get('ages') or [] if a_['age'] == 3), None) for s in rows)
-    first_units = Counter((s.get('first_military') or {}).get('name') for s in rows)
+    first_units = Counter(Blueprints.base_name((s.get('first_military') or {}).get('name') or '') or None for s in rows)
     first_bld = Counter((s.get('first_military_building') or {}).get('name') for s in rows)
     openings = {
         'feudal_landmark': [{'name': k, 'games': v} for k, v in feudal_via.most_common() if k],
@@ -1036,7 +1269,8 @@ def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False, civ=None):
     return {
         'profile_id': pid, 'civ': civ, 'analysed': n, 'wins': wins, 'losses': sum(1 for s in rows if s.get('result') == 'loss'), 'candidates': len(finished), 'games_scanned': len(games), 'missing': len(state['missing']), 'want': want, 'pending': pending, 'rate_limited': rate_limited,
         'tags': tags, 'medians': medians, 'composition': composition, 'unit_mix': unit_mix, 'early_buildings': early_buildings, 'openings': openings, 'records': records, 'api_records': api_records,
-        'games': [{k: s.get(k) for k in ('game_id', 'started_at', 'kind', 'map', 'duration', 'civ', 'result', 'rating_diff', 'villagers_by_10', 'military_by_8', 'apm_replay', 'tags', 'source', 'opening', 'first_military', 'military_by_unit')} | {'feudal': _age_time(s, 2), 'castle': _age_time(s, 3), 'tcs': len(s['town_centers'] or []) + 1} for s in rows],
+        'intel': intel(rows),
+        'games': [{k: s.get(k) for k in ('game_id', 'started_at', 'kind', 'map', 'duration', 'civ', 'result', 'rating_diff', 'villagers_by_10', 'military_by_8', 'apm_replay', 'tags', 'source', 'opening', 'first_military', 'first_military_building', 'military_by_unit', 'dark_age_military', 'castle_first', 'feudal_military')} | {'feudal': _age_time(s, 2), 'castle': _age_time(s, 3), 'tcs': len(s['town_centers'] or []) + 1} for s in rows],
         'updated': time.time(),
     }
 

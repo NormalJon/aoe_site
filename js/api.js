@@ -75,6 +75,8 @@ export const api = {
   player: id => getJSON(u(`/players/${id}`), { ttl: TTL.short }),
   playerGames: (id, params = {}) => getJSON(u(`/players/${id}/games`, { limit: 50, ...params }), { ttl: TTL.short }),
   lastGame: (id, includeStats = false) => getJSON(u(`/players/${id}/games/last`, { include_stats: includeStats || undefined }), { ttl: TTL.short }),
+  /** The newest game on record (ongoing games included); `force` bypasses the cache for live polling. */
+  latestGame: (id, force = false) => getJSON(u(`/players/${id}/games`, { limit: 1 }), { ttl: 30e3, force }).then(d => d.games?.[0] || null),
   game: (playerId, gameId) => getJSON(u(`/players/${playerId}/games/${gameId}`), { ttl: TTL.long }),
 
   // ----- leaderboards -----

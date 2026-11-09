@@ -24,12 +24,18 @@
         <a href="#/compare" data-nav="compare">Compare</a>
         <a href="#/civs" data-nav="civs">Civilizations</a>
         <a href="#/maps" data-nav="maps">Maps</a>
-        <a href="#/live" data-nav="live">Live</a>
-        <a href="#/scout" data-nav="scout">Scout</a>
-        <a href="#/tournament" data-nav="tournament">Cup</a>
-        <a href="#/data" data-nav="data">Data</a>
-        <a href="#/api" data-nav="api">API</a>
+        <a href="#/player/me" data-nav="me" id="nav-me">My profile</a>
         <a href="#/mygames" data-nav="mygames">My games</a>
+        <details class="nav-menu" id="nav-testing">
+          <summary aria-label="Testing menu">Testing</summary>
+          <div class="menu">
+            <span class="menu-label">Prototypes and tools</span>
+            <a href="#/tournament" data-nav="tournament">Forge Cup<small>Monthly Clash-style 1v1 cup</small></a>
+            <a href="#/live" data-nav="live">Live feed<small>Games starting and finishing right now</small></a>
+            <a href="#/data" data-nav="data">Data &amp; sources<small>Endpoints, reachability, terms</small></a>
+            <a href="#/api" data-nav="api">API console<small>Query every data source by hand</small></a>
+          </div>
+        </details>
       </nav>
       <div class="header-search" id="header-search"></div>
       <button class="icon-btn theme-toggle" id="theme-toggle" type="button" aria-label="Toggle color theme" title="Toggle theme">

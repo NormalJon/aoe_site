@@ -1,6 +1,8 @@
 import { el, fmt, setTitle, hrefTo, navigate, clear, append, groupBy, mean, winRate, countryName, median } from '../util.js';
 import { api, fetchPlayerGames, relic, relicAvailable, cachedAt, invalidate, urls } from '../api.js';
-import { renderOverview, sessionize, sessionHeader, perspective } from './player_overview.js';
+import { renderOverview, sessionize, sessionHeader } from './player_overview.js';
+import { liveGamePanel } from './livegame.js';
+import { getMe, setMe, syncMe, meSource } from '../me.js';
 import { avatarImg, countryFlag, socialLinks, rankBadge, statTile, modeTabs, civChip, dataTable, gameRow, subTabs, select, skeleton, errorBox, emptyState, notice, card, wrCell, divBar, streakEl, segmented, flattenTeams, playerLink, resultPill } from '../components.js';
 import { lineChart, sparkline } from '../charts.js';
 import { PROFILE_MODES, MODE, LB, modeName, civName, kindName, parseRankLevel, RELIC_LEADERBOARD_NAMES, RELIC_MATCHTYPE_NAMES } from '../constants.js';
@@ -28,10 +30,23 @@ export async function render(app, route) {
   const lbTotalP = isPublicLb ? api.leaderboard(modeKey).catch(() => null) : Promise.resolve(null);
   const lbEntryP = isPublicLb ? api.leaderboard(modeKey, { profile_id: id }).catch(() => null) : Promise.resolve(null);
   const gamesP = fetchPlayerGames(id, {}, 4).catch(() => ({ games: [], total: 0 }));
-  const liveBanner = el('div');
   const twitchPill = el('span');
   const pctEl = el('span', { class: 'muted small' });
-  holder.append(liveBanner);
+  const live = liveGamePanel({ player, gamesP });
+
+  /* ---------- "This is me": the profile the My profile link and the live panel's "you" column refer to ---------- */
+  const meBox = el('span', { class: 'me-box' });
+  const drawMe = () => {
+    clear(meBox);
+    const me = getMe();
+    if (me && String(me) === String(id)) {
+      meBox.append(el('span', { class: 'pill neutral', title: meSource() === 'companion' ? 'Configured as "me" in forge.local.json' : 'Set as your profile in this browser' }, 'You'));
+      if (meSource() === 'local') meBox.append(el('button', { class: 'linkish small', type: 'button', onClick: () => { setMe(null); drawMe(); } }, 'not me'));
+    } else if (meSource() !== 'companion') {
+      meBox.append(el('button', { class: 'btn', type: 'button', title: 'Show this profile under "My profile" and use it as "you" in opponent intel', onClick: () => { setMe(id); drawMe(); } }, 'This is me'));
+    }
+  };
+  syncMe().then(drawMe);
 
   /* ---------- header ---------- */
   const lastGame = Object.values(player.modes || {}).map(m => m.last_game_at).filter(Boolean).sort().at(-1);
@@ -47,8 +62,10 @@ export async function render(app, route) {
         socialLinks(player.social, player.steam_id),
         el('span', { class: 'muted small freshness' }, fetchedAt ? `Updated ${fmt.rel(fetchedAt)}` : 'Updated just now', ' · ', el('button', { class: 'linkish', type: 'button', onClick: refresh }, 'Refresh')))),
     el('div', { class: 'actions' },
+      meBox,
       el('a', { class: 'btn primary', href: hrefTo(`/compare/${id}`) }, 'Compare with…'),
       el('a', { class: 'btn', href: player.site_url?.replace('http://', 'https://') || `https://aoe4world.com/players/${id}`, target: '_blank', rel: 'noopener' }, 'AoE4 World ↗'))));
+  holder.append(live.el);
 
   /* ---------- mode tabs ---------- */
   const publicModes = modes.filter(m => !m.hidden), hiddenModes = modes.filter(m => m.hidden);
@@ -116,16 +133,6 @@ export async function render(app, route) {
   holder.append(overview);
   gamesP.then(({ games, total }) => {
     if (!holder.isConnected) return;
-    const latest = games[0];
-    if (latest?.ongoing) {
-      const { opps } = perspective(latest, id);
-      const teams = flattenTeams(latest);
-      liveBanner.append(el('div', { class: 'live-banner' }, resultPill('live'),
-        el('span', {}, el('strong', {}, 'In a game right now'), ` · ${latest.map} · ${kindName(latest.kind)}`, opps.length ? [' vs ', opps.map((o, i) => [i ? ', ' : '', el('a', { href: hrefTo(`/player/${o.profile_id}`) }, o.name)])] : null, ` · started ${fmt.rel(latest.started_at)}`),
-        el('span', { style: { marginLeft: 'auto', display: 'inline-flex', gap: '8px' } },
-          teams.length === 2 ? el('a', { class: 'btn sm primary', href: hrefTo('/scout', { mode: gamesFilterFor(modeKey), a: teams[0].map(p => p.profile_id).join(','), b: teams[1].map(p => p.profile_id).join(',') }) }, 'Scout this lobby') : null,
-          el('a', { class: 'btn sm', href: '#/live' }, 'Live feed'))));
-    }
     try { renderOverview(overview, { player, games, modeKey, total }); }
     catch (e) { console.error(e); clear(overview); overview.append(errorBox(e)); }
   });
@@ -151,6 +158,7 @@ export async function render(app, route) {
   else if (tab === 'seasons') renderSeasons(tabBody, player, modeKey);
   else if (tab === 'insights') renderInsights(tabBody, player, modeKey);
   else if (tab === 'official') renderOfficial(tabBody, player);
+  return () => live.stop();   // the router calls this when the page is left: stops the live-game polling
 }
 
 /* ======================= Matches ======================= */

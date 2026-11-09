@@ -43,7 +43,7 @@ Forge's calm density is a feature.
 | P7 | **Per-match badges for any player's recent games** (Top fragger, Highest APM, Fed, Biggest army): the official match history is public per profile id, so badges are not limited to "me" | op.gg, Mobalytics | `getRecentMatchHistory` for the viewed profile — have via proxy | M |
 | P8 | **Session grouping** of the match list with a session record and net rating ("Today · 3W 1L · +41") | Mobalytics, Tracker.gg | games — have | S |
 | P9 | **Match rows v2**: colour-coded result, both rosters inline and clickable, rating change, badges, expand-in-place for details; keep the mode filter tabs | op.gg, U.GG | have | M |
-| P10 | **"In a game right now"** banner with map, mode and opponents, from the live feed; link to scouting (C3) | op.gg / U.GG Live game | `/games` ongoing — have | S |
+| P10 | **"In a game right now"** banner with map, mode and opponents, from the live feed — grown into the **live game panel** with opponent intel (C5) on 8 Nov 2026 | op.gg / U.GG Live game | `/games` ongoing — have | S |
 | P11 | **Freshness and refresh**: "Updated 2 min ago" plus a refresh button that busts the cache | op.gg, Tracker.gg | — | S |
 | P12 | **Personal records and awards**: fastest feudal, most villagers, longest game, longest win streak, biggest upset (rating gap), earliest 2nd TC | aoe2insights awards, Mobalytics records | games + analysed replays — have for me, fetchable for others | M |
 | P13 | **Twitch**: "live now" badge on profiles and leaderboards; VOD link on games when the player was streaming | aoe4world, aoe2insights | leaderboard `twitch_url`, `twitch_is_live` — have | S |
@@ -65,8 +65,9 @@ Forge's calm density is a feature.
 |---|---|---|---|---|
 | C1 | **Skill radar** (two or more players): Economy (villagers by 10:00), Tempo (first age-up), Aggression (military by 8:00), Tech (upgrades per game), Macro (APM), Efficiency (K/D) — normalised to the pair or friend group first, to the bracket later (M4) | Mobalytics GPI | replays + counters — have | M |
 | C2 | **Head-to-head over time** and common opponents, extending today's H2H card | — | games — have | S |
-| C3 | **Multi-search / lobby scouting**: paste up to 8 names (or pick a live game) → ratings, win rates, civ pools, playstyle tags, team-average rating; "which team is favoured" | op.gg multi-search, Blitz loading-screen scouting | search + profiles + P6 — have | M |
+| C3 | ~~**Multi-search / lobby scouting**~~ (shipped 8 Nov 2026 as the Scout page, then replaced the same day by C5: the live game already names the lobby, so pasting it was redundant): paste up to 8 names (or pick a live game) → ratings, win rates, civ pools, playstyle tags, team-average rating; "which team is favoured" | op.gg multi-search, Blitz loading-screen scouting | search + profiles + P6 — have | M |
 | C4 | **Friends leaderboard** and a **Peers** page (everyone you have shared ≥ 2 games with, as teammate or opponent) | Stratz Peers, AoE II Companion country boards | games + config — have | S |
+| C5 | ~~**Live game intel on the profile**~~ — shipped 8 Nov 2026: the profile polls for the player's current game and, per opponent, shows AoE-specific *tells* from their recent replays **as the civ they are on** ("Dark Age Spearman 4/5", "Always 2 TC · 6:40", "Fast Castle · 7:50", "Feudal via Council Hall", "Mass Longbowman", early techs, scripted vs improvised openings, wins short/long games) with the count behind each, their medians next to yours, pick/win rate on that civ, form, record on this map and against you; "Scout ahead" covers the loading screen. Next: watch `temp.rec` for what they are doing *this* game, and bracket baselines (M4) so "44 villagers by 10:00" reads as fast or slow | op.gg Live game, Blitz loading-screen scouting | replays + games API — have | M |
 
 ### Leaderboards and stats
 
@@ -102,6 +103,7 @@ Forge's calm density is a feature.
 1. **Quick wins on the profile (all S) — shipped 7 Nov 2026:** P1 percentile and career ribbon · P2 last-20 deltas · P3 activity pattern · P4 recently played with · P5 rating per civ and map · P8 sessions · P10 live banner · P11 freshness · P13 Twitch. Together these make the profile feel like op.gg/U.GG in a day or two without new data.
 2. **The differentiators nobody else has for AoE4 (M) — shipped 8 Nov 2026:** P6 playstyle tags on profiles · M1 key insights · M2 minute timelines · C1 skill radar · C3 lobby scouting · P12 records, plus a **game summary page for any player's game** (`#/game/:id?p=:profile`) with aoe4world-style minute-aligned build orders, unit/building/tech icon strips and resources spent per minute. All run on the replay pipeline (`tools/replays.py`) through the local companion; the official store hands out one replay per player perspective, so the fetcher takes the largest file and re-fetches when a cached copy is much shorter than the game.
 3. **Infrastructure bets (L):** M4 bracket benchmarks (needs a replay corpus) · L1 rank distribution · X4 follow/notify and X5 AI summaries (need a hosted backend and accounts). Also pending from phase 2: civ- and mode-adjusted radar scales, and a replay-fetch queue that respects the store's rate limit instead of stopping at the first 429.
+4. **Later on 8 Nov 2026:** C5 live-game intel replaced the Scout page; the header was regrouped (Leaderboards · Compare · Civilizations · Maps · My profile · My games · **Testing ▾** with Forge Cup, Live feed, Data and the API console), and "This is me" gives the static copy a notion of "you".
 
 ---
 
