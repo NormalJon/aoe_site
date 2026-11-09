@@ -13,10 +13,12 @@ Everything cached under ./cache (gitignored). Usage from the CLI:
     py -3 -m tools.replays analyze 254628514    # full detail for one game (fetching the replay if needed)
     py -3 -m tools.replays scan                 # (re)scan local replay folders and analyse them
 """
+import base64
 import gzip
 import json
 import os
 import re
+import zlib
 import sys
 import threading
 import time
@@ -27,10 +29,11 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 try:
-    from . import aoe4rec
+    from . import aoe4rec, store
 except ImportError:  # run as a script
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import aoe4rec
+    import store
 
 ROOT = Path(__file__).resolve().parent.parent
 CACHE = ROOT / 'cache'
@@ -377,7 +380,13 @@ def official_history(me, refresh=False):
                 'apm': round((c.get('totalcmds') or 0) / (dur / 60)) if c.get('totalcmds') else None,
                 'rating_before': mem.get('oldrating'), 'rating_after': mem.get('newrating'), 'xp': r.get('xpgained'),
             }
-        out[m['id']] = {'duration': dur, 'matchtype_id': m.get('matchtype_id'), 'players': rows, 'has_replay_urls': bool(m.get('matchurls'))}
+        mg = _mapgen(m)
+        if mg:
+            try:
+                store.mapgen_set(int(m['id']), **mg)
+            except Exception:  # noqa: BLE001
+                pass
+        out[m['id']] = {'duration': dur, 'matchtype_id': m.get('matchtype_id'), 'players': rows, 'has_replay_urls': bool(m.get('matchurls')), 'mapgen': mg}
     return out
 
 
@@ -798,6 +807,12 @@ def game_detail(cfg, game_id, fetch=False, profile=None):
             analysis = analyze_replay(path)
         except Exception as e:  # noqa: BLE001
             fetch_status = f'replay unreadable: {e}'
+    if analysis is not None:   # feed the store: every player's perspective of this game is now known
+        try:
+            store.upsert_games([game])
+            store_perspectives(game, analysis, fetch_status or 'local')
+        except Exception:  # noqa: BLE001
+            pass
     ps = _players_of(game)
     duration = game.get('duration') or (analysis or {}).get('duration')
     # join replay players to API players by name (replays carry display names, not profile ids)
@@ -825,6 +840,7 @@ def game_detail(cfg, game_id, fetch=False, profile=None):
         'blueprints': (analysis or {}).get('blueprints') or {},
         'replay': {'available': analysis is not None, 'status': fetch_status, 'file': (analysis or {}).get('file'), 'build': (analysis or {}).get('build'), 'date': (analysis or {}).get('date')},
         'counters_available': bool(counters),
+        'mapgen': store.mapgen_get(game_id),   # seed, biome and layout from the official match options, when the history had this game
     }
 
 
@@ -900,6 +916,74 @@ def _opponents(g, pid):
             continue
         out += [{k: p.get(k) for k in ('profile_id', 'name', 'civilization', 'rating')} for p in members]
     return out
+
+
+# replay civ codes (as aoe4rec reads them) -> aoe4world slugs, for matching players when names differ
+REPLAY_CIV = {'abbasid': 'abbasid_dynasty', 'abbasid_ha_01': 'ayyubids', 'byzantine': 'byzantines', 'byzantine_ha_mac': 'macedonian_dynasty',
+              'chinese': 'chinese', 'chinese_ha_01': 'zhu_xis_legacy', 'english': 'english', 'french': 'french', 'french_ha_01': 'jeanne_darc',
+              'hre': 'holy_roman_empire', 'hre_ha_01': 'order_of_the_dragon', 'japanese': 'japanese', 'japanese_ha_sen': 'sengoku_daimyo',
+              'jin_dynasty': 'jin_dynasty', 'lancaster': 'house_of_lancaster', 'malian': 'malians', 'mongol': 'mongols', 'mongol_ha_gol': 'golden_horde',
+              'ottoman': 'ottomans', 'rus': 'rus', 'sultanate': 'delhi_sultanate', 'sultanate_ha_tug': 'tughlaq_dynasty', 'templar': 'knights_templar',
+              'viking': 'vikings', 'norse': 'vikings'}
+
+
+def match_players(g, a):
+    """Pair the API players of a game with the players of its replay: by exact name first, then by civ within the
+    team structure, then by elimination. Replay names lag renames and clan-tag changes (one game in seven today),
+    which used to lose the whole game. Returns [(api_player, replay_player)]."""
+    api = [(ti, x.get('player', x)) for ti, t in enumerate(g.get('teams') or []) for x in t]
+    reps = list(a.get('players') or [])
+    pairs, used, rest = [], set(), []
+    for ti, p in api:
+        rp = next((r for r in reps if id(r) not in used and r.get('name') == p.get('name')), None)
+        if rp:
+            pairs.append((p, rp))
+            used.add(id(rp))
+        else:
+            rest.append((ti, p))
+    if rest:
+        team_of = {}   # API team index -> replay team id, learned from the name matches
+        for p, rp in pairs:
+            ti = next(t for t, q in api if q is p)
+            team_of.setdefault(ti, rp.get('team'))
+        still = []
+        for ti, p in rest:
+            cands = [r for r in reps if id(r) not in used and REPLAY_CIV.get(r.get('civ')) == p.get('civilization')
+                     and (ti not in team_of or r.get('team') == team_of[ti])]
+            if len(cands) == 1:
+                pairs.append((p, cands[0]))
+                used.add(id(cands[0]))
+            else:
+                still.append(p)
+        left = [r for r in reps if id(r) not in used]
+        if len(still) == 1 and len(left) == 1:
+            pairs.append((still[0], left[0]))
+    return pairs
+
+
+def store_perspectives(g, a, status):
+    """Write every matched player's summary of this replay to the store, so one parse serves all of them.
+    Returns the set of profile ids written."""
+    rows, pids = [], set()
+    for p, rp in match_players(g, a):
+        try:
+            rows.append((g['game_id'], p['profile_id'], _summarize(rp, g, p, a, status)))
+            pids.add(p['profile_id'])
+        except Exception:  # noqa: BLE001
+            continue
+    store.stats_put_many(rows)
+    return pids
+
+
+def _mapgen(match):
+    """Seed, biome and layout of an official match record, from its base64+zlib `options` blob."""
+    try:
+        o = json.loads(zlib.decompress(base64.b64decode(match.get('options') or '')).rstrip(b'\x00').decode('utf-8', 'replace'))
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(o, dict) or o.get('rnd') is None:
+        return None
+    return {'seed': o.get('rnd'), 'biome': o.get('mapGenBio'), 'layout': o.get('mapGenLayout'), 'map_name': o.get('mapName'), 'size': o.get('mapGenSz')}
 
 
 # ----------------------------------------------------------------------------- intel: AoE-specific tells
@@ -1114,81 +1198,68 @@ def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False, civ=None, v
     `civ` keeps only games the player played as that civ; `vs` only games with an opponent on that civ (together: a
     matchup); `kinds` only games of those kinds (e.g. ['rm_1v1'])."""
     pid = int(pid)
-    store = CACHE / 'analysis' / f'profile_{pid}.json'
-    state = {'analysed': {}, 'missing': {}}
-    if store.exists():
-        try:
-            state = json.loads(store.read_text(encoding='utf-8'))
-        except Exception:  # noqa: BLE001
-            pass
+    store.migrate_from_json()   # first run after the store was introduced: import the JSON caches once
     games = player_games(pid, pages=4 if (civ or vs or kinds) else 2, refresh=refresh)   # a specific civ, matchup or mode may be rare: look further back
+    store.upsert_games(games)
     def me_in(g):
         return next((p for t in g.get('teams') or [] for x in t for p in [x.get('player', x)] if p['profile_id'] == pid), None)
     def vs_ok(opps):
         return not vs or any(o.get('civilization') == vs for o in opps or [])
     def kind_ok(kind):
         return not kinds or kind in kinds
-    finished = [g for g in games if not g.get('ongoing') and (g.get('duration') or 0) >= 480 and kind_ok(g.get('kind'))
+    # candidates: the fresh list plus everything the store already knows about this player (a harvest may have
+    # listed far more history than the two or four pages fetched here)
+    by_id = {g['game_id']: g for g in store.games_for(pid)}
+    by_id.update({g['game_id']: g for g in games})
+    all_games = sorted(by_id.values(), key=lambda g: g.get('started_at') or '', reverse=True)
+    finished = [g for g in all_games if not g.get('ongoing') and (g.get('duration') or 0) >= 480 and kind_ok(g.get('kind'))
                 and (not civ or (me_in(g) or {}).get('civilization') == civ) and vs_ok(_opponents(g, pid))]
     local = local_replays(cfg)
-    matches_civ = lambda s: (not civ or s.get('civ') == civ) and vs_ok(s.get('opponents')) and kind_ok(s.get('kind'))  # noqa: E731
-    # stored summaries written before newer fields existed are rebuilt from the (cached) analysis; opponents only need the API record
-    by_id = {str(g['game_id']): g for g in games}
-    for gid, s in state['analysed'].items():
-        if 'opponents' not in s and gid in by_id:
-            s['opponents'] = _opponents(by_id[gid], pid)
-    for gid, s in list(state['analysed'].items()):
-        if (s.get('v') or 0) >= SUMMARY_V or gid not in by_id or not local.get(int(gid)):
+    matches = lambda s: (not civ or s.get('civ') == civ) and vs_ok(s.get('opponents')) and kind_ok(s.get('kind'))  # noqa: E731
+    have = store.stats_ids(pid)
+    # summaries written before newer fields existed are rebuilt from the cached analysis (every perspective at once)
+    for s in store.stats_for(pid, civ=civ, kinds=kinds):
+        if (s.get('v') or 0) >= SUMMARY_V or s['game_id'] not in by_id or not local.get(s['game_id']):
             continue
         try:
-            a = analyze_replay(local[int(gid)])
-            me_ = me_in(by_id[gid])
-            rp = next((p for p in a['players'] if me_ and p['name'] == me_['name']), None)
-            if rp:
-                state['analysed'][gid] = _summarize(rp, by_id[gid], me_, a, s.get('source', 'cached'))
+            store_perspectives(by_id[s['game_id']], analyze_replay(local[s['game_id']]), s.get('source', 'cached'))
         except Exception:  # noqa: BLE001
             pass
     deadline = time.time() + budget
     rate_limited = False
+    n_have = sum(1 for s in store.stats_for(pid, civ=civ, kinds=kinds) if matches(s))
     for g in finished:
-        gid = str(g['game_id'])
-        if sum(1 for s in state['analysed'].values() if matches_civ(s)) >= want:
-            break
-        if gid in state['analysed']:
+        gid = g['game_id']
+        if gid in have or _unavailable(store.replay_get(gid)):
             continue
-        miss = state['missing'].get(gid)
-        if miss and (miss.get('status') == 'not_found' or time.time() - miss.get('at', 0) < 600):
-            continue
-        if time.time() > deadline:
+        if n_have >= want or time.time() > deadline:
             break
-        path = local.get(int(gid))
+        path = local.get(gid)
         status = 'local'
         if path is None:
-            path, status = fetch_official_replay(int(gid), min_duration=g.get('duration'))
+            path, status = fetch_official_replay(gid, min_duration=g.get('duration'))
             time.sleep(1.0)  # the store rate-limits bursts
         else:
-            path, st2 = ensure_full_replay(int(gid), path, g.get('duration'))
+            path, st2 = ensure_full_replay(gid, path, g.get('duration'))
             status = st2 or status
         if path is None:
             if status == 'rate_limited':
                 rate_limited = True
                 break
-            state['missing'][gid] = {'status': status, 'at': time.time()}
+            store.replay_set(gid, status)
             continue
         try:
             a = analyze_replay(path)
         except Exception as e:  # noqa: BLE001
-            state['missing'][gid] = {'status': f'unreadable: {e}', 'at': time.time()}
+            store.replay_set(gid, f'unreadable: {e}'[:120])
             continue
-        me = next((p for t in g.get('teams') or [] for x in t for p in [x.get('player', x)] if p['profile_id'] == pid), None)
-        rp = next((p for p in a['players'] if me and p['name'] == me['name']), None)
-        if rp is None:
-            state['missing'][gid] = {'status': 'name mismatch', 'at': time.time()}
-            continue
-        state['analysed'][gid] = _summarize(rp, g, me, a, status)
-    store.write_text(json.dumps(state), encoding='utf-8')
+        pids = store_perspectives(g, a, status)   # every player in the replay, not just this one
+        store.replay_set(gid, status if pid in pids else 'name mismatch', path=path, duration=a.get('duration'))
+        if pid in pids:
+            have.add(gid)
+            n_have += 1
 
-    rows = sorted([s for s in state['analysed'].values() if matches_civ(s)], key=lambda s: s['started_at'], reverse=True)
+    rows = [s for s in store.stats_for(pid, civ=civ, kinds=kinds) if matches(s)]   # newest first
     n = len(rows)
     tag_counts, labels = Counter(), {}
     for s in rows:
@@ -1236,7 +1307,7 @@ def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False, civ=None, v
         'highest_apm': best('apm', [(s['apm_replay'], s) for s in rows], reverse=True),
     }
     # records that only need the API game list
-    api_rows = [(g, next((p for t in g.get('teams') or [] for x in t for p in [x.get('player', x)] if p['profile_id'] == pid), None)) for g in games if not g.get('ongoing')]
+    api_rows = [(g, next((p for t in g.get('teams') or [] for x in t for p in [x.get('player', x)] if p['profile_id'] == pid), None)) for g in all_games if not g.get('ongoing')]
     api_rows = [(g, p) for g, p in api_rows if p and p.get('result')]
     longest = max(api_rows, key=lambda gp: gp[0].get('duration') or 0, default=None)
     streak, best_streak, best_end = 0, 0, None
@@ -1261,7 +1332,8 @@ def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False, civ=None, v
         'longest_win_streak': {'value': best_streak, 'game_id': best_end['game_id'] if best_end else None, 'started_at': best_end['started_at'] if best_end else None} if best_streak else None,
         'biggest_upset': {'value': upset[0], 'game_id': upset[1]['game_id'], 'map': upset[1]['map'], 'started_at': upset[1]['started_at']} if upset else None,
     }
-    remaining = [g for g in finished if str(g['game_id']) not in state['analysed'] and (state['missing'].get(str(g['game_id'])) or {}).get('status') != 'not_found']
+    missing_ids = {g['game_id'] for g in finished if g['game_id'] not in have and _unavailable(store.replay_get(g['game_id']))}
+    remaining = [g for g in finished if g['game_id'] not in have and g['game_id'] not in missing_ids]
     pending = min(max(0, want - n), len(remaining))
     # scouting aggregates: what this player builds (optionally as one civ)
     unit_tot = Counter()
@@ -1289,7 +1361,8 @@ def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False, civ=None, v
     }
     wins = sum(1 for s in rows if s.get('result') == 'win')
     return {
-        'profile_id': pid, 'civ': civ, 'vs': vs, 'kinds': kinds, 'analysed': n, 'wins': wins, 'losses': sum(1 for s in rows if s.get('result') == 'loss'), 'candidates': len(finished), 'games_scanned': len(games), 'missing': len(state['missing']), 'want': want, 'pending': pending, 'rate_limited': rate_limited,
+        'profile_id': pid, 'civ': civ, 'vs': vs, 'kinds': kinds, 'analysed': n, 'wins': wins, 'losses': sum(1 for s in rows if s.get('result') == 'loss'), 'candidates': len(finished), 'games_scanned': len(all_games), 'missing': len(missing_ids), 'want': want, 'pending': pending, 'rate_limited': rate_limited,
+        'stored': store.stats_count(pid), 'harvest': store.harvest_get(pid),
         'tags': tags, 'medians': medians, 'composition': composition, 'unit_mix': unit_mix, 'early_buildings': early_buildings, 'openings': openings, 'records': records, 'api_records': api_records,
         'intel': intel(rows),
         'games': [{k: s.get(k) for k in ('game_id', 'started_at', 'kind', 'map', 'duration', 'civ', 'result', 'rating_diff', 'villagers_by_10', 'military_by_8', 'apm_replay', 'tags', 'source', 'opening', 'first_military', 'first_military_building', 'military_by_unit', 'dark_age_military', 'castle_first', 'feudal_military', 'opponents')} | {'feudal': _age_time(s, 2), 'castle': _age_time(s, 3), 'imperial': _age_time(s, 4), 'tcs': len(s['town_centers'] or []) + 1, 'second_tc': (s.get('town_centers') or [None])[0]} for s in rows],
@@ -1297,17 +1370,32 @@ def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False, civ=None, v
     }
 
 
+def _unavailable(r):
+    """True when a stored replay status says fetching this game again now is pointless."""
+    if not r:
+        return False
+    st = str(r.get('status') or '')
+    if st == 'not_found':
+        return time.time() - (r.get('last_attempt') or 0) < 86400
+    return st.startswith(('unreadable', 'name mismatch')) and (r.get('attempts') or 0) >= 2
+
+
 def scan_and_analyze(cfg):
+    """Analyse every local replay and, for the games AoE4 World knows, keep every player's perspective in the store."""
     local = local_replays(cfg)
     bp = blueprints()
-    ok, failed = 0, 0
+    games = {g['game_id']: g for g in my_games(cfg)}
+    store.upsert_games(list(games.values()))
+    ok, failed, stored = 0, 0, 0
     for gid, path in local.items():
         try:
-            analyze_replay(path, bp)
+            a = analyze_replay(path, bp)
             ok += 1
+            if gid in games:
+                stored += len(store_perspectives(games[gid], a, 'local'))
         except Exception:  # noqa: BLE001
             failed += 1
-    return {'replays': len(local), 'analysed': ok, 'failed': failed}
+    return {'replays': len(local), 'analysed': ok, 'failed': failed, 'perspectives_stored': stored}
 
 
 # ----------------------------------------------------------------------------- CLI

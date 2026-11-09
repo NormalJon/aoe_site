@@ -58,6 +58,18 @@ Macro on fixed ladder-wide scales). These work for *any* player: the companion p
 from the official store a few at a time (`/local/profile/:id?n=10`, with `civ=`, `vs=` and `kind=` filters for a
 civ, a matchup and a game mode), so the first visit shows a partial result with an "Analyse more" button.
 
+**The store and the harvester.** Everything replay-derived lives in one SQLite file, `cache/forge.sqlite`
+(`tools/store.py`): AoE4 World game records and their players, the fetch state of every replay, and one summary
+row per player per game, so a replay is downloaded and parsed once and every player in it (opponents, team-mates,
+pros) gets their perspective for free. **Pull every replay** (Playstyle card, Compare Timings, opponent intel)
+queues a background harvest (`tools/harvest.py`, `/local/harvest/:id?start=1&pages=20`): it lists the player's
+whole history, then fetches and analyses every replay the official store still has, one at a time, pausing on
+HTTP 429, with live progress and a stop switch. Players are matched to replay players by name, then by civ and
+team, so renamed players and clan-tag changes no longer lose the game. The official match options also carry the
+**map seed** (`rnd`), biome and layout ids; they are stored per game and the game summary shows the seed.
+`tools/corpus_estimate.py` counts how many games of a civ matchup or map the top-N players produce (see
+[docs/CORPUS_ESTIMATE.md](docs/CORPUS_ESTIMATE.md)).
+
 Dark and light themes (toggle in the header, follows the OS by default). Responsive down to phone width.
 
 ## My games — the local companion

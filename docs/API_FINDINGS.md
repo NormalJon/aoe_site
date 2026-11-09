@@ -121,3 +121,16 @@ Neither API says *what* a player built or *when*. That lives in the replay, a co
    distributions, long-term trends, clan pages, custom percentiles, replay-derived build orders).
 3. Credit AoE4 World visibly, keep request volume modest, and talk to the maintainers on their Discord
    before launching anything high-traffic.
+
+## Map seed, biome and layout (found 9 Nov 2026)
+
+AoE4 World's game records carry `map`, `map_id`, `patch` and `season` but no seed. The official
+`leaderboard/getRecentMatchHistory` records do: each `matchHistoryStats[]` entry has an `options` field that is
+base64 of zlib-compressed JSON with `rnd` (the match's random seed, 32-bit), `mapName` (`dry_arabia`),
+`mapGenBio` (biome id), `mapGenLayout` / `mapGenLayoutNonRandomSelection` (layout ids), `mapGenSz`, win-condition
+flags and the server address. `slotinfo` is the same encoding for the per-slot setup (profile ids, team ids, race
+ids). The companion decodes `options` whenever it reads a player's recent history and stores seed/biome/layout per
+game (`mapgen` table); the game summary shows the seed. Only the ~60 most recent matches per player are available
+this way, so seeds for older games need the replay itself (the replay header also carries the settings, but the
+seed is not labelled there; `winKey` 149419911 is a constant, not a seed). Ranked seeds are random per match, so
+two games sharing one is a coincidence; map + biome + layout is the practical grouping.

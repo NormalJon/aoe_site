@@ -31,7 +31,7 @@ ADMIN_ACTIONS = {"reset", "clock", "seed_demo", "form_brackets"}
 PRIVATE_PREFIXES = ("/cache/", "/forge.local.json", "/.git")
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
-from tools import replays, tournament  # noqa: E402
+from tools import harvest, replays, store, tournament  # noqa: E402
 
 RELIC_BASE = "https://aoe-api.worldsedgelink.com/community/"
 ALLOWED = {
@@ -116,6 +116,15 @@ class Handler(SimpleHTTPRequestHandler):
             if parts == ["tournament", "state"]:
                 as_pid = int(q["as"]) if q.get("as", "").isdigit() else None
                 return self.send_json(200, tournament.get_state(cfg, as_pid))
+            if len(parts) == 2 and parts[0] == "harvest" and parts[1].isdigit():   # background replay harvest for any player
+                pid = int(parts[1])
+                if q.get("start") == "1":
+                    return self.send_json(200, harvest.request(cfg, pid, pages=int(q["pages"]) if q.get("pages", "").isdigit() else 20))
+                if q.get("stop") == "1":
+                    return self.send_json(200, harvest.stop(pid))
+                return self.send_json(200, harvest.status(pid))
+            if parts == ["store"]:
+                return self.send_json(200, store.summary())
             if len(parts) == 2 and parts[0] == "game" and parts[1].isdigit():
                 prof = q.get("profile")
                 if not (prof and prof.isdigit()) and not cfg.get("me"):

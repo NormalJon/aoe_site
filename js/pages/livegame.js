@@ -12,6 +12,7 @@ import { CIVS, civName, civShort, civFlag, kindName, CHART_SERIES, LB } from '..
 import { companionHint, defaultMode } from './_shared.js';
 import { perspective } from './player_overview.js';
 import { getMe } from '../me.js';
+import { harvestControl } from './_harvest.js';
 
 const POLL_MS = 30000;
 const companionMissing = e => !(e instanceof ApiError) || [404, 501, 405].includes(e.status);
@@ -218,7 +219,8 @@ export function opponentIntel({ opp, civ, viewer, lb, map }) {
     clear(tells); clear(numbers); clear(games);
     const n = d.analysed;
     const civWord = civ ? `${civShort(civ)} ` : '';
-    metaEl.textContent = `${n} ${civWord}replay${n === 1 ? '' : 's'} analysed of ${d.candidates} recent ${civWord}games on record${d.missing ? ` · ${d.missing} unavailable` : ''}. Percentages are shares of the analysed games.`;
+    metaEl.textContent = `${n} ${civWord}replay${n === 1 ? '' : 's'} analysed of ${d.candidates} recent ${civWord}games on record${d.missing ? ` · ${d.missing} unavailable` : ''}. Percentages are shares of the analysed games. `;
+    metaEl.append(harvestControl({ pid, label: 'Pull all their replays', onDone: () => load(true) }));
     if (!n) {
       tells.append(el('p', { class: 'muted small', style: { margin: 0 } }, d.candidates ? (d.rate_limited ? 'The official replay store is rate-limiting downloads; try again in a minute. ' : 'No replays could be fetched for these games yet. ') : `No ${civ ? `${civName(civ)} ` : ''}games among the last ${fmt.int(d.games_scanned || 0)} on record. `,
         (d.pending || d.rate_limited) ? moreBtn(d) : null));

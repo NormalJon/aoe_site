@@ -56,7 +56,7 @@ function renderGame(holder, d, { gameId, profile, companion, route }) {
   const colour = new Map(players.map((p, i) => [p.profile_id, `var(${CHART_SERIES[i % CHART_SERIES.length]})`]));
   const back = route.query.back === 'mygames' ? el('a', { class: 'btn', href: '#/mygames' }, '← My games') : el('a', { class: 'btn', href: hrefTo(`/player/${focus.profile_id}`) }, `← ${focus.name}`);
   holder.append(pageHead(`${g.map} · ${kindName(g.kind)}`,
-    el('span', {}, `${fmt.dateTime(g.started_at)} · ${fmt.duration(g.duration)}${g.server ? ` · ${g.server}` : ''}${g.patch ? ` · patch ${g.patch}` : ''}`),
+    el('span', {}, `${fmt.dateTime(g.started_at)} · ${fmt.duration(g.duration)}${g.server ? ` · ${g.server}` : ''}${g.patch ? ` · patch ${g.patch}` : ''}${d.mapgen?.seed ? ` · seed ${d.mapgen.seed}` : ''}`),
     el('div', { style: { display: 'flex', gap: '8px', flexWrap: 'wrap' } }, back,
       companion && !d.replay.available && !route.query.r ? el('a', { class: 'btn primary', href: hrefTo(`/game/${gameId}`, { p: profile, r: Date.now() }) }, 'Retry replay fetch') : null,
       el('a', { class: 'btn', href: `https://aoe4world.com/players/${focus.profile_id}/games/${gameId}`, target: '_blank', rel: 'noopener' }, 'AoE4 World ↗'))));

@@ -5,6 +5,7 @@ import { playerLink, civChip, card, bindTooltip, ttRows, emptyState, flattenTeam
 import { getJSON, ApiError } from '../api.js';
 import { civName, kindName } from '../constants.js';
 import { gamesFilterFor, companionHint } from './_shared.js';
+import { harvestControl } from './_harvest.js';
 
 /* ---------- game helpers ---------- */
 export function perspective(game, id) {
@@ -230,6 +231,7 @@ function playstyleCard(player) {
     const actions = el('div', { style: { display: 'flex', gap: '10px', alignItems: 'center', marginTop: '10px', flexWrap: 'wrap' } });
     if (d.pending || d.rate_limited) actions.append(el('button', { class: 'btn sm', type: 'button', onClick: e => { e.target.disabled = true; e.target.textContent = 'Fetching…'; want = d.analysed + 10; run(true); } }, d.rate_limited ? 'Store rate-limited — retry' : `Analyse ${Math.min(10, d.pending)} more`));
     actions.append(el('span', { class: 'muted small' }, `${d.analysed} replays · ${d.missing} unavailable · percentages = share of analysed games with that tag`));
+    actions.append(harvestControl({ pid: id, label: 'Pull every replay', onProgress: h => { if ((h.done || 0) % 10 === 0) run(true); }, onDone: () => run(true) }));
     body.append(actions);
   }
   run();

@@ -7,6 +7,7 @@ import { civChip, select, segmented, card, notice, skeleton, emptyState, resultP
 import { CIVS, civName, civShort, kindName } from '../constants.js';
 import { companionNotice } from './_shared.js';
 import { AGE, eventEl, groupEvents, runningTotals } from './_board.js';
+import { harvestControl } from './_harvest.js';
 
 const companionMissing = e => !(e instanceof ApiError) || [404, 501, 405].includes(e.status);
 const WANT = 10;                                            // analysed games wanted per side
@@ -162,6 +163,8 @@ export function timingsSection({ A, B, mA, mB, modeKey, route }) {
         line.append(' · ', el('button', { class: 'btn sm', type: 'button', onClick: e => { e.target.disabled = true; e.target.textContent = 'Fetching…'; wants[key] = d.analysed + 6; reload({ force: key }); } },
           d.rate_limited ? 'Store rate-limited — retry' : `Analyse ${Math.min(6, d.pending)} more`));
       }
+      // the harvester pulls this player's whole history in the background; the table refreshes as replays land
+      line.append(' ', harvestControl({ pid: key === 'a' ? a : b, onProgress: h => { if ((h.done || 0) % 5 === 0) reload({ force: key }); }, onDone: () => reload({ force: key }) }));
       sideStatus.append(line);
     }
   }

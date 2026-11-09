@@ -25,8 +25,10 @@ Good to know on the free tier:
 
 - The service **sleeps after about 15 minutes without traffic**; the first request afterwards takes 30–60 s.
   Tell your friends to wait for the first load. The paid starter plan removes this.
-- The **disk is ephemeral**: downloaded replays, the analysis cache and the tournament state in
-  `cache/tournament.json` are lost on every deploy or restart. Fine for testing; for a real cup, add a Render
+- The **disk is ephemeral**: downloaded replays, the analysis cache, the SQLite store (`cache/forge.sqlite`, every
+  analysed game and harvest progress) and the tournament state in `cache/tournament.json` are lost on every deploy
+  or restart. A harvest that was running when the process died shows as "interrupted by a server restart"; *Pull
+  again* resumes it, skipping games already in the store. Fine for testing; for a real cup, add a Render
   persistent disk mounted at `/opt/render/project/src/cache` (paid) or move the store to a database.
 - Every push to `main` redeploys automatically.
 - Outbound calls to AoE4 World and the official replay store now come from Render's IP, shared by everyone
