@@ -93,7 +93,7 @@ Where the data comes from, per game:
 | Source | What it adds | Availability |
 |---|---|---|
 | AoE4 World API | players, civs, ratings and rating change, result, map, duration | every game |
-| World's Edge community API (`getRecentMatchHistory`) | per-player **official counters**: units produced / killed / lost, buildings built / lost, upgrades, total commands (APM), rating before → after | your most recent ~60 matches (rolling window; cached under `cache/`) |
+| World's Edge community API (`getRecentMatchHistory`) | per-player **official counters**: units produced / killed / lost, buildings built / lost, upgrades, total commands (APM), rating before → after | the official API holds only the **10 most recent matches per match type**; the companion stores every set of counters it sees for good (`counters` table) and polls your and your friends' history every 10 minutes while it runs |
 | Replay files | the full **command log** for every player: each unit queued, building placed and technology researched, with timestamps | games the game client kept under `Documents\My Games\Age of Empires IV\network`, plus anything fetched from the official store with **Fetch replay** (`getReplayFiles` → signed download; retention there is spotty) |
 
 Replays record *orders*, not outcomes. Cancelled orders are read too (the cancel-production and cancel-construction

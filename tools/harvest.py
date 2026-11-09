@@ -127,7 +127,7 @@ def _run(cfg, pid, pages):
     progress(state='running', message='listing games on AoE4 World', finished=None)
     games = _list_all(pid, pages, progress)
     try:
-        replays.official_history(pid)        # also records seed / biome / layout of the ~60 most recent matches
+        replays.official_history(pid)        # also stores the counters and seed / biome / layout of the official window (10 matches per match type)
     except Exception:  # noqa: BLE001
         pass
     local = replays.local_replays(cfg)
@@ -195,3 +195,35 @@ def _run(cfg, pid, pages):
             err += 1
         progress(done=done, errors=err, message=f'{g.get("map")} · {str(g.get("started_at"))[:10]}')
     progress(state='done', message=f'{done} replays analysed · {nf} not in the store · {err} unreadable or unmatched', finished=time.time())
+
+
+# ----------------------------------------------------------------------------- official counters poller
+
+POLL_EVERY = 600   # seconds; the official API keeps 10 matches per match type, a 1v1 session produces one every ~25 min
+
+
+def start_counters_poll(cfg, every=POLL_EVERY):
+    """Keep the configured player's (and friends') official counters flowing into the store while the companion runs:
+    import the cached history responses once, then fetch each profile's recent-match history every `every` seconds.
+    Returns the daemon thread, or None when the config names nobody."""
+    pids = [p for p in [cfg.get('me')] + [f.get('profile_id') for f in cfg.get('friends') or []] if p]
+    if not pids:
+        return None
+
+    def loop():
+        try:
+            replays.import_cached_histories()
+        except Exception:  # noqa: BLE001
+            pass
+        while True:
+            for pid in pids:
+                try:
+                    replays.official_history(pid, refresh=True)
+                except Exception:  # noqa: BLE001
+                    pass
+                time.sleep(2)
+            time.sleep(every)
+
+    t = threading.Thread(target=loop, name='counters-poll', daemon=True)
+    t.start()
+    return t

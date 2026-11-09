@@ -215,8 +215,10 @@ def main():
             pass
     httpd = ThreadingHTTPServer((HOST, PORT), Handler)
     cfg = replays.load_config()
+    poll = harvest.start_counters_poll(cfg)
     print(f"Forge server -> http://{'127.0.0.1' if HOST == '0.0.0.0' else HOST}:{PORT}/  (bound to {HOST}; Relic proxy at /relic/..., companion at /local/...)")
     print(f"Companion: me={cfg.get('me')} friends={len(cfg.get('friends') or [])} replay dirs={len(replays.replay_dirs(cfg))} admin key={'set' if ADMIN_KEY else 'not set (demo controls open to everyone)'}")
+    print(f"Official counters: polled every {harvest.POLL_EVERY // 60} min for me and friends and kept in the store" if poll else "Official counters: not polled (no 'me' in forge.local.json)")
     print("Press Ctrl+C to stop.")
     try:
         httpd.serve_forever()

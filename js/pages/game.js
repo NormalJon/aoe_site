@@ -71,7 +71,7 @@ function renderGame(holder, d, { gameId, profile, companion, route }) {
         companion ? 'The official store keeps replays for a limited time; local files are picked up automatically. ' : el('span', {}, 'Build orders, icon strips and timelines need the companion. ', ...companionHint(), ' ')),
     d.counters_available ? el('span', {}, el('strong', {}, 'Official counters: '), 'kills, losses, buildings, upgrades and APM from the game servers.')
       : el('span', {}, el('strong', {}, 'No official counters: '), d.apiOnly ? 'kills, losses, buildings, upgrades and APM also come through the companion.'
-        : 'this game is outside the recent-match window of the official API (about the 60 most recent matches per player).')));
+        : 'the official API keeps only the 10 most recent matches per match type, and the companion had not seen this game while it was in that window.')));
 
   /* key insights */
   if (d.insights?.length) {

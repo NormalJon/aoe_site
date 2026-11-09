@@ -65,7 +65,7 @@ the 25 flag PNGs locally instead.
 | `leaderboard/getAvailableLeaderboards?title=age4` | 127 leaderboards: ids 1–4 = ranked 1v1–4v4 (all-time ELO), 17–20 = QM 1v1–4v4, 206+ console, 479+ Empire Wars, 533 FFA, 601+ event modes, 0 = "Custom" |
 | `leaderboard/getLeaderBoard2?leaderboard_id=&start=&count=&sortBy=1&platform=PC_STEAM&title=age4` | `statGroups[]` (profile_id, alias, `/steam/<id>`, xp, level, country) + `leaderboardStats[]` (wins, losses, streak, drops, rank, ranktotal, ranklevel, rating, regionrank, highestrating, lastmatchdate) |
 | `leaderboard/getPersonalStat?title=age4&profile_ids=[id]` | same two arrays for one or more players, across every ladder they appear on |
-| `leaderboard/getRecentMatchHistory?title=age4&profile_ids=[id]` | ~50 recent matches: `matchHistoryStats[]{id, mapname ("generated_map"), matchtype_id, startgametime, completiontime, matchhistoryreportresults[]{profile_id, resulttype, teamid, civilization_id, xpgained, counters(JSON string)}, matchhistorymember[]{oldrating,newrating,…}, matchurls[]{url (replay .gz on Azure blob), size}}` + `profiles[]` |
+| `leaderboard/getRecentMatchHistory?title=age4&profile_ids=[id]` | the **10 most recent matches per match type** (ranked 1v1, 2v2, 3v3, 4v4, quick match, custom), not the last N overall: `matchHistoryStats[]{id, mapname ("generated_map"), matchtype_id, startgametime, completiontime, matchhistoryreportresults[]{profile_id, resulttype, teamid, civilization_id, xpgained, counters(JSON string)}, matchhistorymember[]{oldrating,newrating,…}, matchurls[]{url (replay .gz on Azure blob), size}}` + `profiles[]` |
 
 `counters` keys: `sqprod/unitprod` (units produced), `sqkill/ekills` (kills), `sqlost` (lost), `bprod/blost`
 (buildings), `upg` (upgrades), `totalcmds` (commands → APM), `gt` (game time), `abil`, `edeaths`, and many
@@ -140,7 +140,7 @@ base64 of zlib-compressed JSON with `rnd` (the match's random seed, 32-bit), `ma
 `mapGenBio` (biome id), `mapGenLayout` / `mapGenLayoutNonRandomSelection` (layout ids), `mapGenSz`, win-condition
 flags and the server address. `slotinfo` is the same encoding for the per-slot setup (profile ids, team ids, race
 ids). The companion decodes `options` whenever it reads a player's recent history and stores seed/biome/layout per
-game (`mapgen` table); the game summary shows the seed. Only the ~60 most recent matches per player are available
+game (`mapgen` table); the game summary shows the seed. Only the 10 most recent matches per match type are available
 this way, so seeds for older games need the replay itself (the replay header also carries the settings, but the
 seed is not labelled there; `winKey` 149419911 is a constant, not a seed). Ranked seeds are random per match, so
 two games sharing one is a coincidence; map + biome + layout is the practical grouping.

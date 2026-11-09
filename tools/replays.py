@@ -360,8 +360,21 @@ def player_games(pid, pages=2, refresh=False, with_meta=False):
 
 
 def official_history(me, refresh=False):
-    """match_id -> official match record with per-player counters (recent ~60 matches)."""
+    """match_id -> official match record with per-player counters. The API holds only the 10 most recent matches per
+    match type (ranked 1v1, 2v2, 3v3, 4v4, quick match, custom), so every fetch also writes what it saw to the store,
+    where the rows stay for good."""
     d = cached_json(f'history_{me}', WE + 'leaderboard/getRecentMatchHistory?' + urllib.parse.urlencode({'title': 'age4', 'profile_ids': json.dumps([int(me)])}), 0 if refresh else 300)
+    out = history_records(d)
+    try:
+        store.official_put_many(out)
+    except Exception:  # noqa: BLE001
+        pass
+    return out
+
+
+def history_records(d):
+    """Parse one getRecentMatchHistory response: match_id -> {duration, matchtype_id, players: {profile_id: counters
+    row}, has_replay_urls}. Also records seed / biome / layout for matches the store has no mapgen row for yet."""
     aliases = {p['profile_id']: p.get('alias') for p in d.get('profiles') or []}
     out = {}
     stats = d.get('matchHistoryStats') or []
@@ -398,6 +411,18 @@ def official_history(me, refresh=False):
         except Exception:  # noqa: BLE001
             pass
     return out
+
+
+def import_cached_histories():
+    """Store the counters of every cached history response under cache/data: responses fetched before the store kept
+    counters can hold matches that have since left the official window. Returns the counters rows written."""
+    n = 0
+    for p in sorted((CACHE / 'data').glob('history_*.json')):
+        try:
+            n += store.official_put_many(history_records(json.loads(p.read_text(encoding='utf-8'))))
+        except Exception:  # noqa: BLE001
+            continue
+    return n
 
 
 # ----------------------------------------------------------------------------- analysis
@@ -678,6 +703,10 @@ def list_games(cfg, refresh=False):
     except Exception:  # noqa: BLE001
         pass
     friends = {f['profile_id']: f for f in cfg.get('friends') or []}
+    try:
+        stored = store.official_ids(g['game_id'] for g in games)   # counters kept from earlier fetches, after the official window moved on
+    except Exception:  # noqa: BLE001
+        stored = set()
     analysed = set()
     for p in (CACHE / 'analysis').glob('M_*.json'):
         m = GID_RE.search(p.name)
@@ -697,7 +726,7 @@ def list_games(cfg, refresh=False):
             'my_civ': mine.get('civilization') if mine else None, 'rating': mine.get('rating') if mine else None, 'rating_diff': mine.get('rating_diff') if mine else None,
             'teammates': [{'profile_id': m['profile_id'], 'name': m['name'], 'civ': m['civilization'], 'friend': m['profile_id'] in friends} for m in mates],
             'opponents': [{'profile_id': o['profile_id'], 'name': o['name'], 'civ': o['civilization']} for o in opps],
-            'has_replay': g['game_id'] in local, 'has_counters': g['game_id'] in hist, 'analysed': g['game_id'] in analysed,
+            'has_replay': g['game_id'] in local, 'has_counters': g['game_id'] in hist or g['game_id'] in stored, 'analysed': g['game_id'] in analysed,
             'tags': game_tags(g, me, cfg.get('friends') or [], g.get('duration')),
         })
     return {'me': me, 'count': len(rows), 'replays_available': sum(r['has_replay'] for r in rows), 'counters_available': sum(r['has_counters'] for r in rows), 'games': rows}
@@ -849,7 +878,13 @@ def game_detail(cfg, game_id, fetch=False, profile=None):
         hist = official_history(focus)
     except Exception:  # noqa: BLE001
         pass
-    counters = (hist.get(game_id) or {}).get('players', {})
+    rec = hist.get(game_id)
+    if not rec:   # gone from the official window (10 matches per match type): use what the companion stored while it was there
+        try:
+            rec = store.official_match(game_id)
+        except Exception:  # noqa: BLE001
+            rec = None
+    counters = (rec or {}).get('players', {})
     analysis = None
     if path is not None:
         try:

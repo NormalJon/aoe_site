@@ -40,6 +40,11 @@ CREATE TABLE IF NOT EXISTS harvest (
     profile_id INTEGER PRIMARY KEY, state TEXT, message TEXT, pages INTEGER DEFAULT 0, games INTEGER DEFAULT 0,
     candidates INTEGER DEFAULT 0, done INTEGER DEFAULT 0, not_found INTEGER DEFAULT 0, errors INTEGER DEFAULT 0,
     started REAL, updated REAL, finished REAL);
+CREATE TABLE IF NOT EXISTS official_matches (
+    game_id INTEGER PRIMARY KEY, matchtype_id INTEGER, duration INTEGER, has_replay_urls INTEGER, fetched REAL);
+CREATE TABLE IF NOT EXISTS counters (
+    game_id INTEGER, profile_id INTEGER, json TEXT NOT NULL, PRIMARY KEY (game_id, profile_id));
+CREATE INDEX IF NOT EXISTS counters_profile ON counters(profile_id, game_id);
 """
 
 _init_lock = threading.Lock()
@@ -327,16 +332,70 @@ def harvest_all():
 
 # ----------------------------------------------------------------------------- overview
 
+# ----------------------------------------------------------------------------- official counters (kept for good)
+
+def official_put_many(matches):
+    """matches: {game_id: {'duration', 'matchtype_id', 'has_replay_urls', 'players': {profile_id: counters row}}}, as
+    replays.official_history builds them. The official API only holds the 10 most recent matches per match type, so
+    everything seen is kept for good; existing rows are left alone (a finished match's counters do not change).
+    Returns the number of counters rows written."""
+    if not matches:
+        return 0
+    now, n = time.time(), 0
+    with closing(connect()) as con:
+        con.execute('BEGIN')
+        for gid, m in matches.items():
+            try:
+                gid = int(gid)
+            except (TypeError, ValueError):
+                continue
+            con.execute('INSERT OR IGNORE INTO official_matches (game_id, matchtype_id, duration, has_replay_urls, fetched) VALUES (?,?,?,?,?)',
+                        (gid, m.get('matchtype_id'), m.get('duration'), 1 if m.get('has_replay_urls') else 0, now))
+            for pid, row in (m.get('players') or {}).items():
+                n += con.execute('INSERT OR IGNORE INTO counters (game_id, profile_id, json) VALUES (?,?,?)', (gid, int(pid), json.dumps(row))).rowcount
+        con.execute('COMMIT')
+    return n
+
+
+def official_match(game_id):
+    """One stored official match in official_history's shape (plus 'stored': True), or None."""
+    with closing(connect()) as con:
+        m = con.execute('SELECT * FROM official_matches WHERE game_id = ?', (int(game_id),)).fetchone()
+        if not m:
+            return None
+        players = {r['profile_id']: json.loads(r['json']) for r in con.execute('SELECT profile_id, json FROM counters WHERE game_id = ?', (int(game_id),))}
+    return {'duration': m['duration'], 'matchtype_id': m['matchtype_id'], 'players': players, 'has_replay_urls': bool(m['has_replay_urls']), 'stored': True}
+
+
+def official_ids(game_ids):
+    """The subset of `game_ids` with stored official counters."""
+    ids = {int(g) for g in game_ids}
+    have = set()
+    if not ids:
+        return have
+    with closing(connect()) as con:
+        for chunk in _chunks(ids):
+            have.update(r['game_id'] for r in con.execute(f"SELECT game_id FROM official_matches WHERE game_id IN ({','.join('?' * len(chunk))})", chunk))
+    return have
+
+
+def counters_for(profile_id):
+    """Every stored counters row of one player: [(game_id, row)], newest game id first."""
+    with closing(connect()) as con:
+        return [(r['game_id'], json.loads(r['json'])) for r in con.execute('SELECT game_id, json FROM counters WHERE profile_id = ? ORDER BY game_id DESC', (int(profile_id),))]
+
+
 def summary():
     with closing(connect()) as con:
         games = con.execute('SELECT COUNT(*) FROM games').fetchone()[0]
+        official = con.execute('SELECT COUNT(*) FROM official_matches').fetchone()[0]
         players = con.execute('SELECT COUNT(DISTINCT profile_id) FROM game_players').fetchone()[0]
         stats = con.execute('SELECT COUNT(*) FROM player_stats').fetchone()[0]
         stats_players = con.execute('SELECT COUNT(DISTINCT profile_id) FROM player_stats').fetchone()[0]
         oldest = con.execute('SELECT MIN(started_at) FROM player_stats').fetchone()[0]
         size = DB_PATH.stat().st_size if DB_PATH.exists() else 0
     return {'path': str(DB_PATH), 'size_bytes': size, 'games': games, 'players_seen': players, 'player_game_stats': stats,
-            'players_with_stats': stats_players, 'oldest_analysed': oldest, 'replays': replays_status_counts(), 'harvests': harvest_all()}
+            'players_with_stats': stats_players, 'oldest_analysed': oldest, 'official_matches': official, 'replays': replays_status_counts(), 'harvests': harvest_all()}
 
 
 # ----------------------------------------------------------------------------- one-time import of the JSON caches
