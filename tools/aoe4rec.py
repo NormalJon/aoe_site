@@ -6,17 +6,24 @@ Layout, per the community documentation of the format (aoe4world/replays-api, do
   * record stream: u32 type; 0 = game tick, 1 = chat / leave record
   * tick: u32 size, u8 version, u32 tick, u32 checksum, u32 block count, blocks of (u32 host, u32 ?, u32 size, payload)
   * payload: commands back to back, each prefixed with its own u16 length; type at byte 2, issuing player (1000 + id)
-    at byte 20, a receiver list at byte 24, then (data type, data length, data) with the blueprint id (pbgid) at
-    data[1:5] for train (0x03), research (0x10) and build (0x7B); build adds the placement position as 3 floats.
+    at byte 20, a receiver list at byte 24 (the entity or group the order is addressed to), then (data type, data
+    length, data) with the blueprint id (pbgid) at data[1:5] for train (0x03), research (0x10) and build (0x7B);
+    build adds the placement position as 3 floats.
 
-A replay records *intentions*: a queued unit may be cancelled, a placed building may never finish.
+Cancels (identified from the stream itself; no public table of opcodes exists):
+  * 0x05 cancel production: 34 bytes, addressed to the producing building, data = a small queue-item id. It follows
+    batches of queued units within seconds and 93 % of its occurrences target a building that had just trained.
+  * 0x38 cancel construction: no data, addressed to a freshly created building entity, typically followed by the same
+    building being placed again.
+A replay records *intentions*: the analyser nets cancelled orders out, but a placed building may still never finish.
 """
 import gzip
 import struct
 from dataclasses import dataclass
 
 TICKS_PER_SECOND = 8
-KINDS = {0x03: 'train', 0x10: 'research', 0x7B: 'build'}
+KINDS = {0x03: 'train', 0x10: 'research', 0x7B: 'build', 0x05: 'cancel', 0x38: 'cancel_build'}
+CANCELS = ('cancel', 'cancel_build')
 
 
 @dataclass
@@ -33,8 +40,9 @@ class Command:
     tick: int
     pid: int
     kind: str
-    pbgid: int
+    pbgid: int                 # 0 for cancels, which name no blueprint
     pos: tuple | None
+    target: str = ''           # receiver list as hex: the building a train/research/cancel was addressed to
 
     @property
     def time(self):
@@ -69,15 +77,21 @@ def _players(b, start, end):
     return out
 
 
-def _data(c):
-    """Skip the 24-byte command header and the receiver list; return the data bytes."""
+def _receiver(c):
+    """The receiver list after the 24-byte command header: (hex, offset of what follows it)."""
     o = 24
     if c[o] == 0x80:
-        o += 2 + 4 * c[o + 1]
+        n = 2 + 4 * c[o + 1]
     elif c[o] & 0x40:
-        o += 1 + 4 * (c[o] & 0x3F)
+        n = 1 + 4 * (c[o] & 0x3F)
     else:
-        o += 4
+        n = 4
+    return c[o:o + n].hex(), o + n
+
+
+def _data(c):
+    """Skip the command header and the receiver list; return the data bytes."""
+    _, o = _receiver(c)
     if o >= len(c) or c[o] == 0xFF:
         return b''
     n, o = c[o + 1], o + 2
@@ -135,12 +149,19 @@ def load_bytes(b):
                         break
                     c = pay[pp:pp + n]
                     pp += n
-                    if len(c) >= 24:
-                        pid = struct.unpack_from('<I', c, 20)[0] - 1000
-                        if 0 <= pid < 64 and c[2] != 0x99:  # ignore camera samples
-                            total_cmds[pid] = total_cmds.get(pid, 0) + 1
-                    k = KINDS.get(c[2]) if len(c) >= 35 else None
+                    if len(c) < 28:
+                        continue
+                    pid = struct.unpack_from('<I', c, 20)[0] - 1000
+                    if 0 <= pid < 64 and c[2] != 0x99:  # ignore camera samples
+                        total_cmds[pid] = total_cmds.get(pid, 0) + 1
+                    k = KINDS.get(c[2])
                     if not k:
+                        continue
+                    target, _ = _receiver(c)
+                    if k in CANCELS:
+                        cmds.append(Command(tick, pid, k, 0, None, target))
+                        continue
+                    if len(c) < 35:
                         continue
                     d = _data(c)
                     if len(d) < 5:
@@ -149,7 +170,7 @@ def load_bytes(b):
                     if k == 'build' and len(d) >= 17:
                         x, _y, z = struct.unpack_from('<fff', d, 5)
                         pos = (round(x, 1), round(z, 1))
-                    cmds.append(Command(tick, struct.unpack_from('<I', c, 20)[0] - 1000, k, struct.unpack_from('<I', d, 1)[0], pos))
+                    cmds.append(Command(tick, pid, k, struct.unpack_from('<I', d, 1)[0], pos, target))
             o = end
         elif kind == 1:
             size, _sub = struct.unpack_from('<II', b, o)

@@ -159,6 +159,12 @@ def replay_set(game_id, status, path=None, duration=None):
                     (int(game_id), status, str(path) if path else None, time.time(), duration))
 
 
+def replay_paths():
+    """Every replay the store has a file for: [(game_id, status, path)], for re-analysis after a parser change."""
+    with closing(connect()) as con:
+        return [(r['game_id'], r['status'], r['path']) for r in con.execute('SELECT game_id, status, path FROM replays WHERE path IS NOT NULL ORDER BY game_id')]
+
+
 def replays_for(game_ids):
     """Fetch state for many games in one query: {game_id: row dict}."""
     out = {}

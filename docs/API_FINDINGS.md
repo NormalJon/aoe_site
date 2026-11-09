@@ -101,9 +101,19 @@ Neither API says *what* a player built or *when*. That lives in the replay, a co
 **What a replay contains** (format per aoe4world/replays-api docs; our reader is `tools/aoe4rec.py`)
 
 - Header with game build and date; player list (name, civ, team, id); then a tick stream (8 ticks/s).
-- Per command: type, issuing player, receivers, blueprint id. We decode train (0x03), research (0x10) and build
-  (0x7B, with map position). Blueprint ids resolve against `data.aoe4world.com` units/buildings/technologies
-  (99.3 % of train orders resolve). Unit classes (`cavalry`, `ranged`, `siege`, `villager`, `trade_cart`, …) and
+- Per command: type, issuing player, receivers (the entity or group the order is addressed to), blueprint id. We
+  decode train (0x03), research (0x10), build (0x7B, with map position), **cancel production (0x05)** and **cancel
+  construction (0x38)**. Blueprint ids resolve against `data.aoe4world.com` units/buildings/technologies
+  (99.3 % of train orders resolve).
+- The cancel opcodes were identified from the stream, as no opcode table is published. 0x05 is 34 bytes, addressed
+  to the producing building, carries a small queue-item id, follows batches of queued units within seconds, and 93 %
+  of its occurrences target a building that had just trained; the analyser undoes the last live order in that
+  building's queue. 0x38 has no payload, is addressed to a freshly created building entity and is followed by the
+  same building being placed again; the analyser undoes the player's last building placed within 20 s. Across 522
+  ranked 1v1 replays refunds were 2–4 % of gross spend, and players cancel more in games they lose, so gross spend
+  flattered the losing side. Other frequent opcodes, not decoded: 0x92/0x94 (about 60 % of the stream, selection
+  and idle samples), 0x3E (moves, with a position), 0x0C (rally points: entity, position or resource target),
+  0x69/0x43/0x48/0x41/0x49 (unit orders with an entity target). Unit classes (`cavalry`, `ranged`, `siege`, `villager`, `trade_cart`, …) and
   landmark classes (`wonder_dark_age` = Feudal landmark, `wonder_feudal_age` = Castle, `wonder_castle_age` =
   Imperial; Abbasid wings are technologies with an `age`) drive the analysis.
 - Not in a replay: positions of units, fights, kills, deaths, resources, idle time. Those are either in the

@@ -406,10 +406,13 @@ def mmss(s):
     return f'{int(s // 60)}:{int(s % 60):02d}'
 
 
+ANALYSIS_V = 'v6'                # bump when analyze_replay or the parser changes; tools/reanalyze.py rebuilds the store
+
+
 def analyze_replay(path, bp=None):
     bp = bp or blueprints()
     path = Path(path)
-    key = CACHE / 'analysis' / (re.sub(r'[^A-Za-z0-9_.-]', '_', path.name) + f'.{int(path.stat().st_mtime)}.v5.json')
+    key = CACHE / 'analysis' / (re.sub(r'[^A-Za-z0-9_.-]', '_', path.name) + f'.{int(path.stat().st_mtime)}.{ANALYSIS_V}.json')
     if key.exists():
         return json.loads(key.read_text(encoding='utf-8'))
     r = aoe4rec.load(path)
@@ -419,26 +422,41 @@ def analyze_replay(path, bp=None):
     nmin = int(r['duration'] // 60) + 1
     for p in r['players']:
         mine = [c for c in r['commands'] if c.pid == p.pid]
-        trains, builds, techs = [], [], []
-        events = []                      # compact command stream: consecutive identical orders in one minute collapse
-        counts = Counter()               # pbgid -> orders
-        per_minute = [{'villagers': 0, 'military': 0, 'buildings': 0, 'techs': 0, 'food': 0, 'wood': 0, 'gold': 0, 'stone': 0, 'mil_spend': 0, 'eco_spend': 0} for _ in range(nmin)]
+        # pass 1: the player's orders, each marked with the time it was cancelled if it was. A cancel-production command
+        # names the building; it undoes the last live order (unit or technology) in that building's queue, falling back
+        # to the player's last live unit order. A cancel-construction command undoes the player's last live building
+        # placed within 20 s. The game refunds a cancelled order in full, so cancelled orders count nowhere below
+        # except in `cancels` and the per-minute `refund`.
+        orders, unmatched = [], 0
         for c in mine:
-            b = bp.get(c.pbgid)
-            if not b:
+            if c.kind in aoe4rec.CANCELS:
+                if c.kind == 'cancel':
+                    o = (next((x for x in reversed(orders) if x['cancelled'] is None and x['kind'] in ('train', 'research') and x['target'] == c.target), None)
+                         or next((x for x in reversed(orders) if x['cancelled'] is None and x['kind'] == 'train'), None))
+                else:
+                    o = next((x for x in reversed(orders) if x['cancelled'] is None and x['kind'] == 'build' and c.time - x['time'] <= 20), None)
+                if o is None:
+                    unmatched += 1
+                else:
+                    o['cancelled'] = c.time
                 continue
-            if c.kind == 'train' and b['kind'] == 'unit':
-                trains.append((c.time, b))
-            elif c.kind == 'build' and b['kind'] == 'building':
-                builds.append((c.time, b, c.pos))
-            elif c.kind == 'research' and b['kind'] == 'tech':
-                techs.append((c.time, b))
-            else:
+            b = bp.get(c.pbgid)
+            if not b or (c.kind, b['kind']) not in (('train', 'unit'), ('build', 'building'), ('research', 'tech')):
                 continue
             used.setdefault(c.pbgid, {'name': b['name'], 'icon': b['icon'], 'kind': b['kind'], 'role': b['role'], 'age': b['age']})
-            counts[c.pbgid] += 1
-            m = min(nmin - 1, int(c.time // 60))
-            pm = per_minute[m]
+            orders.append({'time': c.time, 'kind': c.kind, 'id': c.pbgid, 'b': b, 'pos': c.pos, 'target': c.target, 'cancelled': None})
+        live = [o for o in orders if o['cancelled'] is None]
+        gone = [o for o in orders if o['cancelled'] is not None]
+        trains = [(o['time'], o['b']) for o in live if o['kind'] == 'train']
+        builds = [(o['time'], o['b'], o['pos']) for o in live if o['kind'] == 'build']
+        techs = [(o['time'], o['b']) for o in live if o['kind'] == 'research']
+        counts = Counter(o['id'] for o in live)      # pbgid -> live orders
+        # pass 2: minute buckets from live orders (net of cancels); refunds land in the minute of the cancel
+        per_minute = [{'villagers': 0, 'military': 0, 'buildings': 0, 'techs': 0, 'food': 0, 'wood': 0, 'gold': 0, 'stone': 0, 'mil_spend': 0, 'eco_spend': 0,
+                       'cancels': 0, 'refund': 0} for _ in range(nmin)]
+        for o in live:
+            b = o['b']
+            pm = per_minute[min(nmin - 1, int(o['time'] // 60))]
             cost = b.get('costs') or {}
             total = 0
             for k in ('food', 'wood', 'gold', 'stone'):
@@ -459,10 +477,30 @@ def analyze_replay(path, bp=None):
             else:
                 pm['techs'] += 1
                 pm['eco_spend'] += total
-            if events and events[-1]['id'] == c.pbgid and events[-1]['k'] == c.kind and int(events[-1]['t'] // 60) == m:
+        refund = 0
+        for o in gone:
+            cst = sum((o['b'].get('costs') or {}).get(k, 0) for k in ('food', 'wood', 'gold', 'stone'))
+            pm = per_minute[min(nmin - 1, int(o['cancelled'] // 60))]
+            pm['cancels'] += 1
+            pm['refund'] += cst
+            refund += cst
+        # compact command stream: consecutive identical orders in one minute collapse; a cancel is its own event
+        # (`k: 'cancel'`, `c`: the kind of order undone, `id`: its blueprint) at the time of the cancel
+        events = []
+        stream = sorted([(o['time'], o['kind'], o['id'], None) for o in orders] + [(o['cancelled'], 'cancel', o['id'], o['kind']) for o in gone],
+                        key=lambda x: (x[0], x[1], x[2]))
+        for t, k, pbgid, undone in stream:
+            if events and events[-1]['id'] == pbgid and events[-1]['k'] == k and int(events[-1]['t'] // 60) == int(t // 60):
                 events[-1]['n'] += 1
             else:
-                events.append({'t': round(c.time, 1), 'k': c.kind, 'id': c.pbgid, 'n': 1})
+                ev = {'t': round(t, 1), 'k': k, 'id': pbgid, 'n': 1}
+                if undone:
+                    ev['c'] = undone
+                events.append(ev)
+        cancels = {'count': len(gone), 'unmatched': unmatched, 'refund': refund,
+                   'villagers': sum(1 for o in gone if o['kind'] == 'train' and o['b']['role'] == 'villager'),
+                   'military': sum(1 for o in gone if o['kind'] == 'train' and o['b']['role'] in MIL_ROLES),
+                   'buildings': sum(1 for o in gone if o['kind'] == 'build'), 'techs': sum(1 for o in gone if o['kind'] == 'research')}
         mil = [(t, b) for t, b in trains if b['role'] in MIL_ROLES]
         by_unit = Counter(b['base'] for _, b in trains)          # tiers (Veteran/Elite…) folded into the base unit
         by_unit_exact = Counter(b['name'] for _, b in trains)
@@ -524,6 +562,7 @@ def analyze_replay(path, bp=None):
             'spend_military': sum(pm['mil_spend'] for pm in per_minute),
             'spend_by_15': {'military': sum(pm['mil_spend'] for pm in per_minute[:15]), 'total': sum(pm['mil_spend'] + pm['eco_spend'] for pm in per_minute[:15])},
             'military_by_12': before(720, mil), 'military_by_15': before(900, mil),
+            'cancels': cancels,          # orders undone by the player (refunded in full) and netted out of everything above
         })
     key.write_text(json.dumps(out), encoding='utf-8')
     return out
@@ -859,8 +898,8 @@ def game_detail(cfg, game_id, fetch=False, profile=None):
 
 PROFILE_FIELDS = ('villagers', 'villagers_by_10', 'military', 'military_by_6', 'military_by_8', 'military_by_10', 'military_by_12', 'town_centers', 'ages',
                   'apm_replay', 'commands', 'first_military', 'spend_total', 'spend_military', 'defense_total', 'defense_by_12', 'by_role', 'military_by_unit', 'last_villager', 'villager_gap',
-                  'traders', 'monks')
-SUMMARY_V = 2                     # bump when _summarize gains fields; older stored summaries are rebuilt from the cached analysis
+                  'traders', 'monks', 'cancels')
+SUMMARY_V = 3                     # bump when _summarize gains fields; older stored summaries are rebuilt from the cached analysis
 MIL_ROLE_SET = {'cavalry', 'ranged', 'infantry', 'siege', 'naval', 'other'}
 
 

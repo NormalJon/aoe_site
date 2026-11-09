@@ -187,7 +187,7 @@ function buildOrderBoard(d, players, colour, focus) {
     for (const p of shown) board.append(el('div', { class: 'bo-cell' }, el('div', { class: 'cap' }, `Buildings · ${sum(Object.values(p.replay.buildings_by_name))}`), iconStrip(strip(p, 'building'), bps, { cls: 'buildings' })));
     for (const p of shown) board.append(el('div', { class: 'bo-cell' }, el('div', { class: 'cap' }, `Technologies · ${p.replay.research.length}`), iconStrip(strip(p, 'tech'), bps, { cls: 'techs' })));
     // minute-aligned timeline
-    const byMinute = new Map(shown.map(p => [p.profile_id, groupEvents(p.replay.events.filter(e => state.kinds.has(e.k)))]));
+    const byMinute = new Map(shown.map(p => [p.profile_id, groupEvents(p.replay.events.filter(e => state.kinds.has(e.c || e.k)))]));
     let any = false;
     for (let m = 0; m < limitMin; m++) {
       const cells = shown.map(p => (byMinute.get(p.profile_id).get(m) || []));
@@ -253,7 +253,7 @@ function unitMatrix(players, bps) {
   tb.append(el('tr', { class: 'total' }, el('td', {}, el('strong', {}, 'Villagers')), players.map(p => el('td', { class: 'num' }, el('strong', {}, String(p.replay.villagers))))));
   tb.append(el('tr', { class: 'total' }, el('td', {}, el('strong', {}, 'Military total')), players.map(p => el('td', { class: 'num' }, el('strong', {}, String(p.replay.military))))));
   matrix.append(tb);
-  return card('Units queued, by player', el('div', { class: 'table-wrap' }, matrix), { flush: true, meta: 'counts are production orders from the replay; cancelled units are included; Veteran/Elite tiers folded into the base unit', level: 2 });
+  return card('Units queued, by player', el('div', { class: 'table-wrap' }, matrix), { flush: true, meta: 'counts are production orders from the replay, net of cancelled orders; Veteran/Elite tiers folded into the base unit', level: 2 });
 }
 function teamProduction(d) {
   const roles = ['infantry', 'ranged', 'cavalry', 'siege', 'naval', 'other'];

@@ -96,8 +96,9 @@ Where the data comes from, per game:
 | World's Edge community API (`getRecentMatchHistory`) | per-player **official counters**: units produced / killed / lost, buildings built / lost, upgrades, total commands (APM), rating before → after | your most recent ~60 matches (rolling window; cached under `cache/`) |
 | Replay files | the full **command log** for every player: each unit queued, building placed and technology researched, with timestamps | games the game client kept under `Documents\My Games\Age of Empires IV\network`, plus anything fetched from the official store with **Fetch replay** (`getReplayFiles` → signed download; retention there is spotty) |
 
-Replays record *orders*, not outcomes: a queued unit may be cancelled, a placed building may be destroyed or
-never finished. Kills, losses and APM therefore come from the official counters, never from the replay.
+Replays record *orders*, not outcomes. Cancelled orders are read too (the cancel-production and cancel-construction
+commands) and netted out of every count and spend figure, but a placed building may still be destroyed or never
+finished and a trained unit may die. Kills, losses and APM therefore come from the official counters, never from the replay.
 
 ### Tags
 
@@ -180,7 +181,9 @@ variables so themes just work.
   window; a production backend would ingest full histories and precompute these.
 - Official ladder ids are reverse-engineered; names in `constants.js` cover the common ones.
 - Not yet used: `games/last?include_stats` (per-game economy stats), esports Elo, AoE4 World bulk dumps.
-- Replays are *orders*: "villagers queued" over-counts cancelled units, and civilizations whose workers spawn
+- Replays are *orders*, net of cancels: a cancelled unit, building or technology is refunded in full by the game and
+  dropped from every count and spend figure here (the game board shows it struck through), but a unit that was built
+  and died still counts. Civilizations whose workers spawn
   without an order (Viking Bondi from Longhouses) are excluded from villager comparisons. The official store keeps
   one upload per player perspective; a player who dropped early uploads a truncated file, so the fetcher takes the
   largest file and re-fetches when a cached copy is shorter than 70 % of the game. It also rate-limits bursts

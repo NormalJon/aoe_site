@@ -257,7 +257,7 @@ export function timingsSection({ A, B, mA, mB, modeKey, route }) {
     const totLine = (i, m) => { const t = totals[i][m]; return el('div', { class: 'bo-tot muted small num' }, `by ${m + 1}:00 · ${t.villagers} villager${t.villagers === 1 ? '' : 's'} · ${t.military} military · ${t.buildings} building${t.buildings === 1 ? '' : 's'}`); };
     const noReplay = s => el('div', { class: 'muted small', style: { padding: '2px 6px' } }, `No replay for this game (${String(s.d.replay?.status || 'unavailable').replace('_', ' ')}).`);
     if (state.view === 'minute') {
-      const byMin = cols.map(s => s.rp ? groupEvents(s.rp.events.filter(e => state.kinds.has(e.k))) : new Map());
+      const byMin = cols.map(s => s.rp ? groupEvents(s.rp.events.filter(e => state.kinds.has(e.c || e.k))) : new Map());
       for (let m = 0; m < limit; m++) {
         board.append(minuteHead(m));
         cols.forEach((s, i) => {
@@ -272,7 +272,7 @@ export function timingsSection({ A, B, mA, mB, modeKey, route }) {
       // PAIR_S seconds of the row's first order joins that row, so near-simultaneous moves sit side by side.
       const PAIR_S = 5;
       if (cols.some(s => !s.rp)) cols.forEach(s => board.append(el('div', { class: 'bo-cell events lane' }, s.rp ? null : noReplay(s))));
-      const merged = cols.flatMap((s, lane) => (s.rp ? s.rp.events.filter(e => state.kinds.has(e.k) && e.t < limit * 60) : []).map(e => ({ e, lane }))).sort((x, y) => x.e.t - y.e.t);
+      const merged = cols.flatMap((s, lane) => (s.rp ? s.rp.events.filter(e => state.kinds.has(e.c || e.k) && e.t < limit * 60) : []).map(e => ({ e, lane }))).sort((x, y) => x.e.t - y.e.t);
       const rowsByMinute = new Map();
       for (const x of merged) {
         const m = Math.floor(x.e.t / 60);
