@@ -15,6 +15,8 @@ import * as mygames from './pages/mygames.js';
 import * as game from './pages/game.js';
 import * as tournament from './pages/tournament.js';
 import * as apiConsole from './pages/api.js';
+import * as themesPage from './pages/themes.js';
+import { THEMES, initTheme, setTheme, currentTheme } from './theme.js';
 
 /** #/player/me → the configured or chosen profile; explains how to set one otherwise. */
 const mePage = {
@@ -43,6 +45,7 @@ const routes = [
   { test: p => p[0] === 'data', page: data, nav: 'data' },
   { test: p => p[0] === 'api', page: apiConsole, nav: 'api' },
   { test: p => p[0] === 'mygames', page: mygames, nav: 'mygames' },
+  { test: p => p[0] === 'themes', page: themesPage, nav: 'themes' },
   { test: p => p[0] === 'scout', page: { render: app => { app.append(notice(el('strong', {}, 'Scout moved. '), 'Opponent intel now lives on the profile page: open ', el('a', { href: '#/player/me' }, 'My profile'), ' — in a game the panel fills in by itself, otherwise use "Scout ahead".')); } }, nav: 'me' },
 ];
 const notFound = { page: { render: app => { app.append(notice('Page not found. ', el('a', { href: '#/' }, 'Go home'))); } }, nav: null };
@@ -84,25 +87,26 @@ function refreshMeNav() {
   if (r.parts[0] === 'player' && me && String(r.parts[1]) === String(me)) markNav('me');
 }
 document.addEventListener('forge:me', refreshMeNav);
-// the Testing menu closes when you click elsewhere
-document.addEventListener('pointerdown', e => { document.querySelectorAll('.main-nav details[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; }); });
+// the dropdown menus (Testing, Theme) close when you click elsewhere
+document.addEventListener('pointerdown', e => { document.querySelectorAll('details.nav-menu[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; }); });
 
-/* theme */
-const THEME_KEY = 'forge-theme';
-function applyTheme(t) { if (t === 'light') document.documentElement.setAttribute('data-theme', 'light'); else document.documentElement.removeAttribute('data-theme'); }
-function initTheme() {
-  let t = null; try { t = localStorage.getItem(THEME_KEY); } catch { /* ignore */ }
-  if (!t) t = window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-  applyTheme(t);
-  document.getElementById('theme-toggle')?.addEventListener('click', () => {
-    const next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
-    applyTheme(next); try { localStorage.setItem(THEME_KEY, next); } catch { /* ignore */ }
-    // Charts read colours from CSS variables at render time; re-render the page so canvases pick them up.
-    route();
-  });
+/* theme menu: dark, light and the historical candidates from the Theme lab (js/theme.js holds the list and the switch) */
+function buildThemeMenu() {
+  const list = document.getElementById('theme-menu-list');
+  if (!list) return;
+  for (const t of THEMES) {
+    list.append(el('button', { type: 'button', 'data-theme-pick': t.key, 'aria-pressed': String(currentTheme() === t.key), onClick: () => setTheme(t.key) },
+      t.name, el('small', {}, t.key === 'dark' || t.key === 'light' ? (t.key === 'dark' ? 'default' : 'light mode') : `${t.scheme} · candidate`)));
+  }
+  list.append(el('a', { href: '#/themes', 'data-nav': 'themes' }, 'Compare them side by side ›'));
 }
+document.addEventListener('forge:theme', () => {
+  const menu = document.getElementById('theme-menu'); if (menu) menu.open = false;
+  route();   // charts read colours from CSS variables at render time: re-render so canvases pick them up
+});
 
 initTheme();
+buildThemeMenu();
 document.getElementById('header-search')?.append(searchBox({ placeholder: 'Search players…' }));
 window.addEventListener('hashchange', route);
 refreshMeNav();
