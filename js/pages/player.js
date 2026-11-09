@@ -6,7 +6,7 @@ import { getMe, setMe, syncMe, meSource } from '../me.js';
 import { avatarImg, countryFlag, socialLinks, rankBadge, statTile, modeTabs, civChip, dataTable, gameRow, subTabs, select, skeleton, errorBox, emptyState, notice, card, wrCell, divBar, streakEl, segmented, flattenTeams, playerLink, resultPill } from '../components.js';
 import { lineChart, sparkline } from '../charts.js';
 import { PROFILE_MODES, MODE, LB, modeName, civName, kindName, parseRankLevel, RELIC_LEADERBOARD_NAMES, RELIC_MATCHTYPE_NAMES } from '../constants.js';
-import { fillAsync, ratingHistoryPoints, modesWithData, defaultMode, gamesFilterFor, companionHint } from './_shared.js';
+import { fillAsync, ratingHistoryPoints, modesWithData, defaultMode, gamesFilterFor, companionHint, PERIODS, periodSince, periodLabel } from './_shared.js';
 
 export async function render(app, route) {
   const id = route.parts[1];
@@ -23,7 +23,8 @@ export async function render(app, route) {
   const modeKey = MODE[route.query.mode] && player.modes?.[route.query.mode] ? route.query.mode : defaultMode(player);
   const mode = player.modes?.[modeKey] || {};
   const tab = route.query.tab || 'matches';
-  const link = (patch) => hrefTo(`/player/${id}`, { mode: modeKey, tab, ...patch });
+  const period = PERIODS.some(p => p.value === route.query.period) ? route.query.period : '';   // time window for Matches, Civilizations, Insights
+  const link = (patch) => hrefTo(`/player/${id}`, { mode: modeKey, tab, period: period || undefined, ...patch });
 
   /* ---------- side data: ladder size (percentile), the player's ladder entry (Twitch live), recent games (overview) ---------- */
   const isPublicLb = !!LB[modeKey];
@@ -70,9 +71,9 @@ export async function render(app, route) {
   /* ---------- mode tabs ---------- */
   const publicModes = modes.filter(m => !m.hidden), hiddenModes = modes.filter(m => m.hidden);
   holder.append(el('div', { class: 'mode-tabs' },
-    publicModes.length ? modeTabs(publicModes, modeKey, k => hrefTo(`/player/${id}`, { mode: k, tab })) : el('span', { class: 'muted' }, 'No ladder games on record.'),
+    publicModes.length ? modeTabs(publicModes, modeKey, k => link({ mode: k })) : el('span', { class: 'muted' }, 'No ladder games on record.'),
     hiddenModes.length ? el('span', { class: 'muted' }, '· hidden ELO: ') : null,
-    hiddenModes.length ? modeTabs(hiddenModes, modeKey, k => hrefTo(`/player/${id}`, { mode: k, tab })) : null));
+    hiddenModes.length ? modeTabs(hiddenModes, modeKey, k => link({ mode: k })) : null));
 
   /* ---------- career ribbon (season finishes for ranked modes) ---------- */
   {
@@ -150,23 +151,27 @@ export async function render(app, route) {
     { value: 'insights', label: 'Insights' }, { value: 'official', label: 'Official data' },
   ];
   const tabBody = el('div');
-  const tabsEl = subTabs(tabsDef, tab, v => navigate(`/player/${id}`, { mode: modeKey, tab: v }));
-  holder.append(el('section', { class: 'card', style: { marginTop: '16px' } }, tabsEl, tabBody));
+  const tabsEl = subTabs(tabsDef, tab, v => navigate(`/player/${id}`, { mode: modeKey, tab: v, period: period || undefined }));
+  // Period applies to the tabs computed from the games list; Seasons and Official data have their own time base.
+  const periodSel = ['matches', 'civs', 'insights'].includes(tab)
+    ? el('label', { class: 'period' }, 'Period ', select(PERIODS, period, v => navigate(`/player/${id}`, { mode: modeKey, tab, period: v || undefined }), { ariaLabel: 'Period' })) : null;
+  holder.append(el('section', { class: 'card', style: { marginTop: '16px' } }, el('div', { class: 'tabs-row' }, tabsEl, periodSel), tabBody));
 
-  if (tab === 'matches') renderMatches(tabBody, player, modeKey);
-  else if (tab === 'civs') renderCivs(tabBody, player, modeKey);
+  if (tab === 'matches') renderMatches(tabBody, player, modeKey, period);
+  else if (tab === 'civs') renderCivs(tabBody, player, modeKey, period);
   else if (tab === 'seasons') renderSeasons(tabBody, player, modeKey);
-  else if (tab === 'insights') renderInsights(tabBody, player, modeKey);
+  else if (tab === 'insights') renderInsights(tabBody, player, modeKey, period);
   else if (tab === 'official') renderOfficial(tabBody, player);
   return () => live.stop();   // the router calls this when the page is left: stops the live-game polling
 }
 
 /* ======================= Matches ======================= */
-function renderMatches(box, player, modeKey) {
+function renderMatches(box, player, modeKey, period = '') {
   const id = player.profile_id;
   let filterMode = gamesFilterFor(modeKey);
   let result = 'all';
-  let page = 1; let games = []; let total = 0; let nextPage = null;
+  let page = 1; let games = []; let total = 0; let nextPage = null; let patch = null;   // patch: the newest game's patch when the period is "current patch"
+  const since = periodSince(period);
   const list = el('div', { class: 'game-list card flush', style: { border: '1px solid var(--border)' } });
   const summary = el('span', { class: 'muted small' });
   const more = el('button', { class: 'btn', type: 'button', style: { marginTop: '12px' } }, 'Load more');
@@ -186,32 +191,60 @@ function renderMatches(box, player, modeKey) {
       for (const g of s.games) list.append(gameRow(g, { perspectiveId: id }));
     }
     const w = games.filter(g => flattenTeams(g).flat().find(p => p.profile_id === id)?.result === 'win').length;
-    summary.textContent = `Showing ${shown.length} of ${fmt.int(total)} games · loaded ${games.length} (${w} W – ${games.length - w} L)`;
+    summary.textContent = period === 'patch'
+      ? `Showing ${shown.length} games on patch ${patch ?? '—'} · loaded ${games.length} (${w} W – ${games.length - w} L)`
+      : `Showing ${shown.length} of ${fmt.int(total)} games${period ? ` ${periodLabel(period)}` : ''} · loaded ${games.length} (${w} W – ${games.length - w} L)`;
     more.style.display = nextPage ? '' : 'none';
   }
   async function load() {
     more.disabled = true; more.textContent = 'Loading…';
     if (!games.length) { clear(list); list.append(skeleton(8)); }
     try {
-      const d = await api.playerGames(id, { leaderboard: filterMode || undefined, page, limit: 50 });
-      games.push(...(d.games || [])); total = d.total_count ?? games.length; nextPage = d.next_page;
+      const d = await api.playerGames(id, { leaderboard: filterMode || undefined, page, limit: 50, since: since || undefined });
+      let batch = d.games || [];
+      nextPage = d.next_page;
+      if (period === 'patch') {   // games arrive newest first: once an older patch shows up, nothing further is on the current one
+        patch ??= batch.find(g => g.patch)?.patch ?? null;
+        if (batch.some(g => g.patch !== patch)) nextPage = null;
+        batch = batch.filter(g => g.patch === patch);
+      }
+      games.push(...batch); total = d.total_count ?? games.length;
       draw();
     } catch (e) { clear(list); list.append(errorBox(e, load)); }
     more.disabled = false; more.textContent = 'Load more';
   }
-  function reset() { page = 1; games = []; total = 0; nextPage = null; load(); }
+  function reset() { page = 1; games = []; total = 0; nextPage = null; patch = null; load(); }
   more.addEventListener('click', () => { if (nextPage) { page = nextPage; load(); } });
   load();
 }
 
 /* ======================= Civilizations ======================= */
-function renderCivs(box, player, modeKey) {
+function renderCivs(box, player, modeKey, period = '') {
   const mode = player.modes?.[modeKey] || {};
-  const civs = mode.civilizations || [];
-  if (!civs.length) {
-    box.append(notice('The API does not publish a per-civilization breakdown for this mode. The Insights tab computes one from loaded matches instead.'));
+  if (period) {   // a time window: the season table from the API cannot be cut by date, so count the games ourselves
+    const body = el('div'); box.append(body);
+    fillAsync(body, () => loadPeriodGames(player.profile_id, modeKey, period), ({ mine, total, label, truncated }) => {
+      if (!mine.length) return notice(`No finished ${modeName(gamesFilterFor(modeKey))} games ${label}.`);
+      const civs = [...groupBy(mine, x => x.me.civilization)].map(([civilization, arr]) => {
+        const w = arr.filter(x => x.me.result === 'win').length;
+        return { civilization, games_count: arr.length, pick_rate: 100 * arr.length / mine.length, win_rate: 100 * w / arr.length };
+      });
+      const frag = document.createDocumentFragment();
+      frag.append(notice(`Computed in your browser from ${fmt.int(mine.length)} finished ${modeName(gamesFilterFor(modeKey))} games ${label}${truncated ? ' (the most recent 300; older ones are not loaded)' : total > mine.length ? ` (of ${fmt.int(total)} on record)` : ''}. Pick rate is the share of these games.`));
+      frag.append(civsBreakdown(civs, `${fmt.int(mine.length)} games ${label}`));
+      return frag;
+    }, { lines: 8 });
     return;
   }
+  const civs = mode.civilizations || [];
+  if (!civs.length) {
+    box.append(notice('The API does not publish a per-civilization breakdown for this mode. The Insights tab computes one from loaded matches instead, and any period other than the season does too.'));
+    return;
+  }
+  box.append(civsBreakdown(civs, `${fmt.int(civs.reduce((a, c) => a + c.games_count, 0))} games this season`));
+}
+/** Tiles + table for a per-civilization breakdown (`rows`: {civilization, games_count, pick_rate, win_rate}). */
+function civsBreakdown(civs, totalLabel) {
   const total = civs.reduce((a, c) => a + c.games_count, 0);
   const columns = [
     { key: 'civilization', label: 'Civilization', render: r => civChip(r.civilization), sortValue: r => civName(r.civilization) },
@@ -222,11 +255,27 @@ function renderCivs(box, player, modeKey) {
   ];
   const fav = [...civs].sort((a, b) => b.games_count - a.games_count)[0];
   const best = [...civs].filter(c => c.games_count >= Math.max(5, total * 0.03)).sort((a, b) => b.win_rate - a.win_rate)[0];
-  box.append(el('div', { class: 'tiles', style: { marginBottom: '14px' } },
-    statTile({ label: 'Civ pool', value: String(civs.length), unit: 'civilizations', sub: `${fmt.int(total)} games this season` }),
-    statTile({ label: 'Most played', value: el('span', {}, civChip(fav.civilization, { size: 'lg', name: 'short' })), sub: `${fmt.pct(fav.pick_rate, 0)} of games · ${fmt.pct(fav.win_rate, 0)} win rate` }),
-    best ? statTile({ label: 'Best win rate (≥3% of games)', value: el('span', {}, civChip(best.civilization, { size: 'lg', name: 'short' })), sub: `${fmt.pct(best.win_rate, 1)} over ${best.games_count} games` }) : null));
-  box.append(dataTable({ columns, rows: civs, sort: { key: 'games_count', dir: 'desc' }, caption: 'Civilization breakdown' }));
+  return el('div', {},
+    el('div', { class: 'tiles', style: { marginBottom: '14px' } },
+      statTile({ label: 'Civ pool', value: String(civs.length), unit: 'civilizations', sub: totalLabel }),
+      statTile({ label: 'Most played', value: el('span', {}, civChip(fav.civilization, { size: 'lg', name: 'short' })), sub: `${fmt.pct(fav.pick_rate, 0)} of games · ${fmt.pct(fav.win_rate, 0)} win rate` }),
+      best ? statTile({ label: 'Best win rate (≥3% of games)', value: el('span', {}, civChip(best.civilization, { size: 'lg', name: 'short' })), sub: `${fmt.pct(best.win_rate, 1)} over ${best.games_count} games` }) : null),
+    dataTable({ columns, rows: civs, sort: { key: 'games_count', dir: 'desc' }, caption: 'Civilization breakdown' }));
+}
+
+/** A player's finished games for a mode within a period (`''` = the usual 150 most recent; `7d`/`14d`/`30d`; `patch` = newest patch only). */
+async function loadPeriodGames(id, modeKey, period, maxPages = 6) {
+  const filter = gamesFilterFor(modeKey);
+  const since = periodSince(period);
+  const { games, total } = await fetchPlayerGames(id, { leaderboard: filter, limit: 50, since: since || undefined }, period ? maxPages : 3);
+  let list = games, label = periodLabel(period);
+  if (period === 'patch') {
+    const patch = games.find(g => g.patch)?.patch;
+    list = games.filter(g => g.patch === patch);
+    label = `on patch ${patch ?? '—'}`;
+  }
+  const mine = list.map(g => ({ g, me: flattenTeams(g).flat().find(p => p.profile_id === id), teams: flattenTeams(g) })).filter(x => x.me && x.me.result);
+  return { mine, total, label, truncated: !!period && games.length >= maxPages * 50 && list.length === games.length };
 }
 
 /* ======================= Seasons ======================= */
@@ -255,16 +304,17 @@ function renderSeasons(box, player, modeKey) {
 }
 
 /* ======================= Insights (derived from matches) ======================= */
-function renderInsights(box, player, modeKey) {
+function renderInsights(box, player, modeKey, period = '') {
   const id = player.profile_id;
   const filter = gamesFilterFor(modeKey);
   const body = el('div');
   box.append(body);
-  fillAsync(body, () => fetchPlayerGames(id, { leaderboard: filter, limit: 50 }, 3), ({ games, total }) => {
-    const mine = games.map(g => ({ g, me: flattenTeams(g).flat().find(p => p.profile_id === id), teams: flattenTeams(g) })).filter(x => x.me && x.me.result);
-    if (!mine.length) return notice('No finished games to analyse for this mode.');
+  fillAsync(body, () => loadPeriodGames(id, modeKey, period), ({ mine, total, label, truncated }) => {
+    if (!mine.length) return notice(period ? `No finished ${modeName(filter)} games ${label}.` : 'No finished games to analyse for this mode.');
     const frag = document.createDocumentFragment();
-    frag.append(notice(`Computed in your browser from the ${fmt.int(mine.length)} most recent finished ${modeName(filter)} games (of ${fmt.int(total)} on record).`));
+    frag.append(notice(period
+      ? `Computed in your browser from ${fmt.int(mine.length)} finished ${modeName(filter)} games ${label}${truncated ? ' (the most recent 300; older ones are not loaded)' : total > mine.length ? ` (of ${fmt.int(total)} on record)` : ''}.`
+      : `Computed in your browser from the ${fmt.int(mine.length)} most recent finished ${modeName(filter)} games (of ${fmt.int(total)} on record).`));
 
     const rec = arr => { const w = arr.filter(x => x.me.result === 'win').length; return { w, l: arr.length - w, n: arr.length, wr: winRate(w, arr.length - w) }; };
     const recordCols = (labelKey, labelRender) => [

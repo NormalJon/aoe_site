@@ -5,6 +5,7 @@ import { lineChart, radarChart } from '../charts.js';
 import { getJSON, ApiError } from '../api.js';
 import { MODE, PROFILE_MODES, modeName, civName, parseRankLevel } from '../constants.js';
 import { fillAsync, ratingHistoryPoints, modesWithData, gamesFilterFor, pageHead, companionNotice } from './_shared.js';
+import { timingsSection } from './compare_timings.js';
 
 export async function render(app, route) {
   const a = route.parts[1], b = route.parts[2];
@@ -34,6 +35,12 @@ export async function render(app, route) {
   holder.append(el('div', { class: 'mode-tabs' }, modeTabs(modes.filter(m => !m.hidden), modeKey, k => hrefTo(`/compare/${a}/${b}`, { mode: k })),
     modes.some(m => m.hidden) ? el('span', { class: 'muted' }, '· hidden ELO:') : null,
     modes.some(m => m.hidden) ? modeTabs(modes.filter(m => m.hidden), modeKey, k => hrefTo(`/compare/${a}/${b}`, { mode: k })) : null));
+
+  // Section order: replay timings first (the part that explains *how* two players differ), then the skill radar,
+  // then the ladder numbers, civ pools and the head-to-head record.
+  const secTimings = el('div'), secRadar = el('div', { style: { marginTop: '16px' } }), secLadder = el('div'), secCivs = el('div'), secH2H = el('div');
+  holder.append(secTimings, secRadar, secLadder, secCivs, secH2H);
+  secTimings.append(timingsSection({ A, B, mA, mB, modeKey, route }));
 
   /* ----- metric table ----- */
   const metrics = [
@@ -66,7 +73,7 @@ export async function render(app, route) {
   const pA = ratingHistoryPoints(mA), pB = ratingHistoryPoints(mB);
   const chart = lineChart({ series: [{ name: A.name, color: '--s1', points: pA }, { name: B.name, color: '--s2', points: pB }], height: 280, emptyText: 'Rating history is not available for this mode.' });
 
-  holder.append(el('div', { class: 'grid cols-2', style: { marginTop: '16px' } },
+  secLadder.append(el('div', { class: 'grid cols-2', style: { marginTop: '16px' } },
     card('Rating history', chart, { meta: MODE[modeKey]?.ranked && !MODE[modeKey]?.hidden ? 'season to date' : 'all time' }),
     card(`${modeName(modeKey)} at a glance`, el('div', { class: 'table-wrap' }, table), { flush: true })));
 
@@ -92,14 +99,14 @@ export async function render(app, route) {
       { key: 'gb', label: `${B.name} games`, num: true, render: r => fmt.int(r.gb) },
       { key: 'wb', label: `${B.name} win %`, num: true, render: r => r.gb ? wrCell(r.wb) : el('span', { class: 'muted' }, '—') },
     ], rows: allCivs.map(c => ({ civ: c, ga: civsA.get(c)?.games_count || 0, wa: civsA.get(c)?.win_rate ?? null, gb: civsB.get(c)?.games_count || 0, wb: civsB.get(c)?.win_rate ?? null })), sort: { key: 'ga', dir: 'desc' } });
-    holder.append(el('div', { class: 'grid cols-2', style: { marginTop: '16px' } },
+    secCivs.append(el('div', { class: 'grid cols-2', style: { marginTop: '16px' } },
       card('Civilization pools', el('div', {}, db, el('div', { class: 'legend' }, el('span', { class: 'key' }, el('i', { class: 'rect', style: { '--c': 'var(--s1)' } }), A.name), el('span', { class: 'key' }, el('i', { class: 'rect', style: { '--c': 'var(--s2)' } }), B.name), el('span', { class: 'muted' }, '· dot position = pick rate, scaled to the most-picked civ'))), { meta: 'top 12 by combined games' }),
       card('Win rates by civ', civTable, { flush: true })));
   }
 
   /* ----- skill radar (replays via the companion) ----- */
   const radarBox = el('div', {}, skeleton(5));
-  holder.append(el('div', { style: { marginTop: '16px' } }, card('Skill radar', radarBox, { meta: 'medians over each player’s recently analysed replays · fixed ladder-wide scales' })));
+  secRadar.append(card('Skill radar', radarBox, { meta: 'medians over each player’s recently analysed replays · fixed ladder-wide scales' }));
   Promise.all([getJSON(`local/profile/${a}?n=10&budget=15`, { ttl: 10 * 60e3 }), getJSON(`local/profile/${b}?n=10&budget=15`, { ttl: 10 * 60e3 })]).then(([pa, pb]) => {
     clear(radarBox);
     if (!pa.analysed && !pb.analysed) { radarBox.append(notice('No replays analysed for either player yet', pa.rate_limited || pb.rate_limited ? ' (the official replay store is rate-limiting downloads; try again in a minute).' : '.')); return; }
@@ -118,7 +125,7 @@ export async function render(app, route) {
 
   /* ----- head to head ----- */
   const h2hBox = el('div');
-  holder.append(el('div', { style: { marginTop: '16px' } }, card('Head to head', h2hBox, { meta: 'all modes, up to 150 most recent meetings' })));
+  secH2H.append(el('div', { style: { marginTop: '16px' } }, card('Head to head', h2hBox, { meta: 'all modes, up to 150 most recent meetings' })));
   fillAsync(h2hBox, () => fetchPlayerGames(a, { opponent_profile_id: b, limit: 50 }, 3), ({ games, total }) => {
     const finished = games.filter(g => !g.ongoing);
     if (!finished.length) return emptyState(`${A.name} and ${B.name} have not played each other on record.`);

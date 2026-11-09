@@ -8,11 +8,10 @@ import { civChip, playerLink, resultPill, dataTable, select, card, notice, skele
 import { civName, kindName, CHART_SERIES } from '../constants.js';
 import { lineChart } from '../charts.js';
 import { pageHead, companionHint } from './_shared.js';
+import { AGE, AGE_ROMAN, iconImg, eventEl, groupEvents } from './_board.js';
 
 const RES_COLORS = { food: 'var(--s2)', wood: 'var(--s3)', gold: 'var(--s4)', stone: 'var(--muted)' };
 const ROLE_COLORS = { infantry: 'var(--s1)', ranged: 'var(--s2)', cavalry: 'var(--s3)', siege: 'var(--s4)', naval: 'var(--s7)', other: 'var(--de-emphasis)' };
-const AGE = { 2: 'Feudal', 3: 'Castle', 4: 'Imperial' };
-const AGE_ROMAN = ['', 'I', 'II', 'III', 'IV'];
 
 export function tagChip(t, { me = false } = {}) {
   const chip = el('span', { class: `tag ${t.tag.startsWith('with:') ? 'friend' : ''} ${me ? 'me' : ''}`, tabindex: 0 }, t.label);
@@ -127,11 +126,6 @@ function scoreboards(d) {
 }
 
 /* ============================== build order board ============================== */
-function iconImg(bp, size = 28) {
-  const img = el('img', { class: 'bp-icon', src: bp?.icon || '', alt: '', width: size, height: size, loading: 'lazy', referrerpolicy: 'no-referrer' });
-  img.addEventListener('error', () => { img.replaceWith(el('span', { class: 'bp-icon fallback', style: { width: `${size}px`, height: `${size}px` } }, (bp?.name || '?').slice(0, 2))); });
-  return img;
-}
 function iconStrip(entries, bps, { cls = '' } = {}) {
   // entries: [{id, n}] sorted by count
   if (!entries.length) return el('div', { class: `icon-strip ${cls}` }, el('span', { class: 'muted small' }, 'none'));
@@ -201,12 +195,7 @@ function buildOrderBoard(d, players, colour, focus) {
       any = true;
       board.append(el('div', { class: 'bo-minute', style: { gridColumn: '1 / -1' } }, `${m}:00`));
       shown.forEach((p, i) => {
-        board.append(el('div', { class: 'bo-cell events' }, cells[i].map(ev => {
-          const bp = bps[ev.id] || {};
-          const ageUp = p.replay.ages.find(a => a.via === bp.name && Math.abs(a.time - ev.t) < 1);
-          return el('div', { class: `bo-ev ${ev.k} ${bp.role || ''} ${ageUp ? 'ageup' : ''}`, title: `${fmt.duration(ev.t)} ${bp.name || ev.id}${ev.n > 1 ? ` × ${ev.n}` : ''}` },
-            el('span', { class: 'num t' }, fmt.duration(ev.t)), iconImg(bp, 22), el('span', { class: 'nm' }, bp.name || `#${ev.id}`), ageUp ? el('span', { class: 'age-pill' }, `→ ${AGE[ageUp.age]}`) : null, ev.n > 1 ? el('span', { class: 'x' }, `× ${ev.n}`) : null);
-        })));
+        board.append(el('div', { class: 'bo-cell events' }, cells[i].map(ev => eventEl(ev, bps, p.replay.ages))));
       });
     }
     if (!any) board.append(el('div', { style: { gridColumn: '1 / -1' } }, emptyState('Nothing to show for this selection.')));
@@ -215,12 +204,6 @@ function buildOrderBoard(d, players, colour, focus) {
   draw();
   return card('Build orders', el('div', {}, controls, body), { meta: 'every order from the replay, aligned by minute · consecutive identical orders are collapsed into × n', level: 2 });
 }
-function groupEvents(events) {
-  const m = new Map();
-  for (const e of events) { const k = Math.floor(e.t / 60); if (!m.has(k)) m.set(k, []); m.get(k).push(e); }
-  return m;
-}
-
 /* ============================== timelines ============================== */
 function timelines(d, players, colour, focus) {
   const duration = d.game.duration || 0;

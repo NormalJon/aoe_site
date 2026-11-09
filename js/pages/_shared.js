@@ -54,6 +54,21 @@ export function defaultMode(player) {
   for (const k of pref) { const d = player?.modes?.[k]; if (d && d.rating) return k; }
   return 'rm_solo';
 }
+/* ---------- time windows over a player's games (the aggregate stats API has none) ---------- */
+export const PERIODS = [
+  { value: '', label: 'Season to date' },
+  { value: '7d', label: 'Last 7 days' }, { value: '14d', label: 'Last 14 days' }, { value: '30d', label: 'Last 30 days' },
+  { value: 'patch', label: 'Current patch' },
+];
+/** ISO timestamp for the games endpoint's `since`, or null when the period is not a day count. */
+export function periodSince(period) {
+  const days = { '7d': 7, '14d': 14, '30d': 30 }[period];
+  return days ? new Date(Date.now() - days * 86400e3).toISOString() : null;
+}
+export function periodLabel(period) {
+  return { '7d': 'in the last 7 days', '14d': 'in the last 14 days', '30d': 'in the last 30 days', patch: 'on the current patch' }[period] || 'season to date';
+}
+
 /** Map a profile mode key to the `leaderboard` filter accepted by the player games endpoint. */
 export function gamesFilterFor(modeKey) {
   const m = { rm_1v1_elo: 'rm_solo', rm_2v2_elo: 'rm_team', rm_3v3_elo: 'rm_team', rm_4v4_elo: 'rm_team' };

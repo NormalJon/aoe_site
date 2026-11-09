@@ -23,6 +23,8 @@ export async function render(app, route) {
     el('label', {}, 'Rating ', select(RATING_FILTERS, rating, v => go({ rating: v, rank: '' }), { ariaLabel: 'Rating bracket' })),
     el('span', { class: 'spacer' }),
     (rank || rating) ? el('a', { class: 'btn sm ghost', href: hrefTo('/civs', { lb }) }, 'Clear filters') : null));
+  app.append(el('p', { class: 'muted small', style: { margin: '-8px 0 14px' } },
+    'AoE4 World publishes these aggregates for its current patch set only, not by date. For a time window, such as the week since a patch, open a player profile and set the Period on the Civilizations or Insights tab.'));
 
   const tiles = el('div', { class: 'tiles', style: { marginBottom: '16px' } });
   const tableBox = el('div');

@@ -878,6 +878,7 @@ def _summarize(rp, g, me, a, status):
     first_mil = rp.get('first_military')
     s.update({'game_id': g['game_id'], 'started_at': g['started_at'], 'kind': g['kind'], 'map': g['map'], 'duration': dur,
               'civ': me.get('civilization'), 'result': me.get('result'), 'rating_diff': me.get('rating_diff'), 'source': status,
+              'opponents': _opponents(g, me['profile_id']),
               'tags': [t['tag'] for t in tags], 'tag_labels': {t['tag']: t['label'] for t in tags},
               'opening': opening, 'early_buildings': dict(early), 'landmarks': rp.get('landmarks') or [],
               'first_military_building': {'time': first_mil_b['time'], 'name': first_mil_b['name']} if first_mil_b else None,
@@ -888,6 +889,17 @@ def _summarize(rp, g, me, a, status):
               'pre_feudal_buildings': dict(Counter(x['name'] for x in rp.get('build_order') or [] if feudal_t is None or x['time'] < feudal_t)),
               'first_techs': [{'t': round(x['time'], 1), 'name': x['name']} for x in (rp.get('research') or [])[:6]]})
     return s
+
+
+def _opponents(g, pid):
+    """The players on the other team(s) of an API game record, as small dicts (for matchup filters and labels)."""
+    out = []
+    for t in g.get('teams') or []:
+        members = [x.get('player', x) for x in t]
+        if any(p.get('profile_id') == pid for p in members):
+            continue
+        out += [{k: p.get(k) for k in ('profile_id', 'name', 'civilization', 'rating')} for p in members]
+    return out
 
 
 # ----------------------------------------------------------------------------- intel: AoE-specific tells
@@ -1095,10 +1107,12 @@ def intel(rows):
     return out[:12]
 
 
-def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False, civ=None):
+def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False, civ=None, vs=None, kinds=None):
     """Aggregate replay-derived tags, medians and records over a player's recent games.
     Fetches replays from the official store as needed, a few per call (time budget), and caches everything.
-    Returns a partial result with `pending` > 0 when more games could still be analysed."""
+    Returns a partial result with `pending` > 0 when more games could still be analysed.
+    `civ` keeps only games the player played as that civ; `vs` only games with an opponent on that civ (together: a
+    matchup); `kinds` only games of those kinds (e.g. ['rm_1v1'])."""
     pid = int(pid)
     store = CACHE / 'analysis' / f'profile_{pid}.json'
     state = {'analysed': {}, 'missing': {}}
@@ -1107,14 +1121,22 @@ def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False, civ=None):
             state = json.loads(store.read_text(encoding='utf-8'))
         except Exception:  # noqa: BLE001
             pass
-    games = player_games(pid, pages=4 if civ else 2, refresh=refresh)   # a specific civ may be rare: look further back
+    games = player_games(pid, pages=4 if (civ or vs or kinds) else 2, refresh=refresh)   # a specific civ, matchup or mode may be rare: look further back
     def me_in(g):
         return next((p for t in g.get('teams') or [] for x in t for p in [x.get('player', x)] if p['profile_id'] == pid), None)
-    finished = [g for g in games if not g.get('ongoing') and (g.get('duration') or 0) >= 480 and (not civ or (me_in(g) or {}).get('civilization') == civ)]
+    def vs_ok(opps):
+        return not vs or any(o.get('civilization') == vs for o in opps or [])
+    def kind_ok(kind):
+        return not kinds or kind in kinds
+    finished = [g for g in games if not g.get('ongoing') and (g.get('duration') or 0) >= 480 and kind_ok(g.get('kind'))
+                and (not civ or (me_in(g) or {}).get('civilization') == civ) and vs_ok(_opponents(g, pid))]
     local = local_replays(cfg)
-    matches_civ = lambda s: not civ or s.get('civ') == civ  # noqa: E731
-    # stored summaries written before newer fields existed are rebuilt from the (cached) analysis
+    matches_civ = lambda s: (not civ or s.get('civ') == civ) and vs_ok(s.get('opponents')) and kind_ok(s.get('kind'))  # noqa: E731
+    # stored summaries written before newer fields existed are rebuilt from the (cached) analysis; opponents only need the API record
     by_id = {str(g['game_id']): g for g in games}
+    for gid, s in state['analysed'].items():
+        if 'opponents' not in s and gid in by_id:
+            s['opponents'] = _opponents(by_id[gid], pid)
     for gid, s in list(state['analysed'].items()):
         if (s.get('v') or 0) >= SUMMARY_V or gid not in by_id or not local.get(int(gid)):
             continue
@@ -1267,10 +1289,10 @@ def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False, civ=None):
     }
     wins = sum(1 for s in rows if s.get('result') == 'win')
     return {
-        'profile_id': pid, 'civ': civ, 'analysed': n, 'wins': wins, 'losses': sum(1 for s in rows if s.get('result') == 'loss'), 'candidates': len(finished), 'games_scanned': len(games), 'missing': len(state['missing']), 'want': want, 'pending': pending, 'rate_limited': rate_limited,
+        'profile_id': pid, 'civ': civ, 'vs': vs, 'kinds': kinds, 'analysed': n, 'wins': wins, 'losses': sum(1 for s in rows if s.get('result') == 'loss'), 'candidates': len(finished), 'games_scanned': len(games), 'missing': len(state['missing']), 'want': want, 'pending': pending, 'rate_limited': rate_limited,
         'tags': tags, 'medians': medians, 'composition': composition, 'unit_mix': unit_mix, 'early_buildings': early_buildings, 'openings': openings, 'records': records, 'api_records': api_records,
         'intel': intel(rows),
-        'games': [{k: s.get(k) for k in ('game_id', 'started_at', 'kind', 'map', 'duration', 'civ', 'result', 'rating_diff', 'villagers_by_10', 'military_by_8', 'apm_replay', 'tags', 'source', 'opening', 'first_military', 'first_military_building', 'military_by_unit', 'dark_age_military', 'castle_first', 'feudal_military')} | {'feudal': _age_time(s, 2), 'castle': _age_time(s, 3), 'tcs': len(s['town_centers'] or []) + 1} for s in rows],
+        'games': [{k: s.get(k) for k in ('game_id', 'started_at', 'kind', 'map', 'duration', 'civ', 'result', 'rating_diff', 'villagers_by_10', 'military_by_8', 'apm_replay', 'tags', 'source', 'opening', 'first_military', 'first_military_building', 'military_by_unit', 'dark_age_military', 'castle_first', 'feudal_military', 'opponents')} | {'feudal': _age_time(s, 2), 'castle': _age_time(s, 3), 'imperial': _age_time(s, 4), 'tcs': len(s['town_centers'] or []) + 1, 'second_tc': (s.get('town_centers') or [None])[0]} for s in rows],
         'updated': time.time(),
     }
 

@@ -124,10 +124,11 @@ class Handler(SimpleHTTPRequestHandler):
             if len(parts) == 2 and parts[0] == "profile" and parts[1].isdigit():
                 want = max(1, min(40, int(q.get("n") or 10)))
                 budget = max(2.0, min(45.0, float(q.get("budget") or 20)))
-                civ = q.get("civ") or None
-                if civ and not civ.replace("_", "").isalnum():
-                    return self.send_json(400, {"error": "bad civ"})
-                return self.send_json(200, replays.playstyle_profile(cfg, int(parts[1]), want=want, budget=budget, refresh=q.get("refresh") == "1", civ=civ))
+                civ, vs = q.get("civ") or None, q.get("vs") or None
+                kinds = [k for k in (q.get("kind") or "").split(",") if k] or None
+                if any(c and not c.replace("_", "").isalnum() for c in (civ, vs, *(kinds or []))):
+                    return self.send_json(400, {"error": "bad civ or kind"})
+                return self.send_json(200, replays.playstyle_profile(cfg, int(parts[1]), want=want, budget=budget, refresh=q.get("refresh") == "1", civ=civ, vs=vs, kinds=kinds))
             # --- endpoints about the configured player ---
             if not cfg.get("me"):
                 return self.send_json(400, {"error": "forge.local.json has no 'me' profile id"})
