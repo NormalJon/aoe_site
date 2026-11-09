@@ -1,5 +1,5 @@
 // Router + shell behaviour.
-import { parseHash, el, clear, qs } from './util.js';
+import { parseHash, el, clear, qs, setTitle } from './util.js';
 import { searchBox, errorBox, notice } from './components.js';
 import { getMe, syncMe } from './me.js';
 import { pageHead } from './pages/_shared.js';
@@ -21,6 +21,7 @@ const mePage = {
   async render(app, r) {
     const me = await syncMe();
     if (me) { location.replace(`#/player/${me}${qs(r.query)}`); return; }
+    setTitle('My profile');
     app.append(pageHead('My profile', 'Forge does not know which player you are yet.'),
       notice(el('strong', {}, 'Pick yourself: '), 'search for your name, open your profile and press ', el('strong', {}, 'This is me'), '. With the companion running, the ', el('code', {}, 'me'), ' entry of forge.local.json is used automatically.'),
       el('div', { style: { marginTop: '16px', maxWidth: '560px' } }, searchBox({ large: true, autofocus: true, placeholder: 'Search your name…' })));

@@ -139,6 +139,7 @@ export function opponentIntel({ opp, civ, viewer, lb, map }) {
   const numbers = el('div', { class: 'intel-numbers' });
   const games = el('div', { class: 'intel-games' });
   const metaEl = el('div', { class: 'muted small', style: { marginTop: '8px' } });
+  const numbersCap = el('div', { class: 'cap', style: { marginTop: '12px' } }, 'By the numbers · medians');   // hidden while there is nothing to show
   box.append(
     el('div', { class: 'intel-head' },
       civ ? civChip(civ, { size: 'lg' }) : el('span', { class: 'civ lg' }, el('span', { class: 'cname muted' }, 'All civs')),
@@ -147,7 +148,7 @@ export function opponentIntel({ opp, civ, viewer, lb, map }) {
         ladder)),
     el('div', { class: 'intel-grid' },
       el('div', {}, el('div', { class: 'cap' }, 'Tells from replays'), tells),
-      el('div', {}, el('div', { class: 'cap' }, 'Quick facts'), facts, el('div', { class: 'cap', style: { marginTop: '12px' } }, 'By the numbers · medians'), numbers)),
+      el('div', {}, el('div', { class: 'cap' }, 'Quick facts'), facts, numbersCap, numbers)),
     games, metaEl);
 
   /* ladder: rating, rank, civ pick/win rate on the relevant ladder */
@@ -205,12 +206,12 @@ export function opponentIntel({ opp, civ, viewer, lb, map }) {
   function load(force = false) {
     clear(tells); clear(numbers); clear(games);
     tells.append(el('p', { class: 'muted small', style: { margin: '0 0 6px' } }, `Pulling ${opp.name}’s recent ${civ ? `${civName(civ)} ` : ''}replays from the official store… a few seconds per game.`), skeleton(4));
-    numbers.append(skeleton(3));
-    const url = `local/profile/${pid}?${new URLSearchParams({ ...(civ ? { civ } : {}), n: String(want), budget: '15' })}`;
+    numbersCap.hidden = false; numbers.append(skeleton(3));
+    const url =`local/profile/${pid}?${new URLSearchParams({ ...(civ ? { civ } : {}), n: String(want), budget: '15' })}`;
     Promise.all([getJSON(url, { ttl: 10 * 60e3, force }), mineP]).then(([d, mine]) => { if (box.isConnected) drawReplayIntel(d, mine); }).catch(e => {
       clear(tells); clear(numbers); clear(games); metaEl.textContent = '';
       tells.append(el('p', { class: 'muted small', style: { margin: 0 } }, companionMissing(e) ? ['Replay tells need the companion server. ', ...companionHint()] : String(e.message || e)));
-      numbers.append(el('span', { class: 'muted small' }, '—'));
+      numbersCap.hidden = true;
     });
   }
   function drawReplayIntel(d, mine) {
@@ -221,7 +222,7 @@ export function opponentIntel({ opp, civ, viewer, lb, map }) {
     if (!n) {
       tells.append(el('p', { class: 'muted small', style: { margin: 0 } }, d.candidates ? (d.rate_limited ? 'The official replay store is rate-limiting downloads; try again in a minute. ' : 'No replays could be fetched for these games yet. ') : `No ${civ ? `${civName(civ)} ` : ''}games among the last ${fmt.int(d.games_scanned || 0)} on record. `,
         (d.pending || d.rate_limited) ? moreBtn(d) : null));
-      numbers.append(el('span', { class: 'muted small' }, '—'));
+      numbersCap.hidden = true;
       return;
     }
     const list = el('ul', { class: 'tells' });
