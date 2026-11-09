@@ -5,28 +5,28 @@
 
 :root {
   color-scheme: dark;
-  --page: #0f1115;
-  --surface: #171a21;
-  --surface-2: #1d2129;
-  --surface-3: #242934;
-  --ink: #f0efec;
-  --ink-2: #c3c2b7;
-  --muted: #8f8d86;
-  --grid: #262a33;
-  --axis: #383c46;
-  --border: rgba(255,255,255,0.10);
-  --border-strong: rgba(255,255,255,0.18);
-  --accent: #e0b24a;
-  --accent-ink: #1a1405;
-  --brand-bg: #10131a;
-  --link: #6da7ec;
-  --focus: #86b6ef;
+  --page: #141518;
+  --surface: #1c1e23;
+  --surface-2: #23262c;
+  --surface-3: #2b2f36;
+  --ink: #ebe4d6;
+  --ink-2: #c2b9a7;
+  --muted: #8d8676;
+  --grid: #2a2d34;
+  --axis: #3b3f48;
+  --border: rgba(235,228,214,0.10);
+  --border-strong: rgba(235,228,214,0.20);
+  --accent: #d9a84a;
+  --accent-ink: #1b1405;
+  --brand-bg: #121317;
+  --link: #cfa85c;
+  --focus: #e2bb66;
   --shadow: 0 1px 2px rgba(0,0,0,.35), 0 8px 24px -12px rgba(0,0,0,.6);
 
-  /* categorical series (dark steps) */
-  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500;
-  --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767;
-  --de-emphasis: #5b5e66;
+  /* categorical series: heraldic tinctures (azure, gules, vert, or, purpure, tenné, sable, a rose) */
+  --s1: #4a7fc6; --s2: #c0453a; --s3: #3f8a5a; --s4: #d4a537;
+  --s5: #8a5aa8; --s6: #c27232; --s7: #7a8794; --s8: #d98282;
+  --de-emphasis: #5a5c62;
 
   /* status (fixed) */
   --good: #0ca30c; --warn: #fab219; --serious: #ec835a; --critical: #d03b3b;
@@ -35,7 +35,7 @@
   /* sequential blue ramp */
   --seq-100: #cde2fb; --seq-200: #9ec5f4; --seq-300: #6da7ec; --seq-400: #3987e5;
   --seq-500: #256abf; --seq-600: #184f95; --seq-700: #0d366b;
-  --div-mid: #383835;
+  --div-mid: #35332e;
 
   /* rank tiers (identity colours for badges; always paired with a text label) */
   --tier-unranked: #6b6e76; --tier-bronze: #b87333; --tier-silver: #aeb1b8; --tier-gold: #d9a521;
@@ -44,6 +44,7 @@
   --radius: 12px; --radius-sm: 8px;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --font-display: "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;   /* headings and the wordmark */
 }
 
 :root[data-theme="light"] {
@@ -55,7 +56,7 @@
   --accent: #b8860b; --accent-ink: #fff8e6; --brand-bg: #1d2129;
   --link: #1c5cab; --focus: #2a78d6;
   --shadow: 0 1px 2px rgba(0,0,0,.06), 0 8px 24px -14px rgba(0,0,0,.18);
-  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948;
+  --s1: #2f5fa8; --s2: #b3303a; --s3: #3f7d4e; --s4: #c08f1f; --s5: #7a4b8f; --s6: #b86a2b; --s7: #556270; --s8: #c25a5a;
   --de-emphasis: #b9b7ae;
   --good-text: #006300; --critical-text: #b42318;
   --div-mid: #f0efec;
@@ -74,7 +75,7 @@ a { color: var(--link); text-decoration: none; }
 a:hover { text-decoration: underline; }
 img { display: block; max-width: 100%; }
 button, input, select { font: inherit; color: inherit; }
-h1, h2, h3, h4 { margin: 0; line-height: 1.2; letter-spacing: -0.01em; }
+h1, h2, h3, h4 { margin: 0; line-height: 1.2; letter-spacing: .01em; font-family: var(--font-display); }
 h1 { font-size: 28px; font-weight: 700; }
 h2 { font-size: 20px; font-weight: 650; }
 h3 { font-size: 16px; font-weight: 650; }
@@ -102,7 +103,7 @@ main.container { flex: 1; padding-top: 24px; padding-bottom: 48px; }
 .brand { display: flex; align-items: center; gap: 10px; color: var(--ink); }
 .brand:hover { text-decoration: none; }
 .brand-mark { width: 30px; height: 30px; }
-.brand-name { font-weight: 800; font-size: 18px; letter-spacing: .01em; }
+.brand-name { font-family: var(--font-display); font-weight: 700; font-size: 19px; letter-spacing: .02em; }
 .brand-tag { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; margin-top: 2px; }
 .main-nav { display: flex; gap: 2px; margin-left: 8px; }
 .main-nav a { color: var(--ink-2); padding: 7px 11px; border-radius: 8px; font-weight: 500; font-size: 14px; white-space: nowrap; }
@@ -684,97 +685,5 @@ table.data.timings td .muted.small { margin-top: 2px; }
 .matchup-line { margin: -4px 0 10px; }
 .matchup-line .linkish { font-size: inherit; }
 
-/* ==========================================================================
-   Historical theme candidates (Theme lab: #/themes)
-   Each set works both as the page theme (html[data-theme=…]) and as a scoped preview (.theme-…) so the lab
-   can show them side by side. Headings take --font-display (a system serif here; the body face stays the
-   sans). Chart series switch to heraldic tinctures: azure, gules, vert, or, purpure, tenné, sable, a rose.
-   Status colours for win and loss are unchanged.
-   ========================================================================== */
-h1, h2, h3, h4 { font-family: var(--font-display, var(--font)); }
-
-/* Castle stone: dark basalt, torchlight gold. The least change from today. */
-:root[data-theme="stone"], .theme-stone {
-  color-scheme: dark;
-  --page: #141518; --surface: #1c1e23; --surface-2: #23262c; --surface-3: #2b2f36;
-  --ink: #ebe4d6; --ink-2: #c2b9a7; --muted: #8d8676;
-  --grid: #2a2d34; --axis: #3b3f48; --border: rgba(235,228,214,0.10); --border-strong: rgba(235,228,214,0.20);
-  --accent: #d9a84a; --accent-ink: #1b1405; --brand-bg: #121317; --link: #cfa85c; --focus: #e2bb66;
-  --s1: #4a7fc6; --s2: #c0453a; --s3: #3f8a5a; --s4: #d4a537; --s5: #8a5aa8; --s6: #c27232; --s7: #7a8794; --s8: #d98282;
-  --de-emphasis: #5a5c62; --div-mid: #35332e;
-  --font-display: "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
-}
-:root[data-theme="stone"] :is(h1, h2, h3, h4), .theme-stone :is(h1, h2, h3, h4) { letter-spacing: .01em; }
-:root[data-theme="stone"] .card-head, .theme-stone .card-head { border-bottom: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); padding-bottom: 8px; }
-
-/* Parchment: warm paper, iron-gall ink, a wax-seal sienna. A scribe's ledger. */
-:root[data-theme="parchment"], .theme-parchment {
-  color-scheme: light;
-  --page: #ece2cc; --surface: #f7f0df; --surface-2: #efe6d1; --surface-3: #e5dac1;
-  --ink: #2b2219; --ink-2: #5b4d3d; --muted: #857561;
-  --grid: #dccfb4; --axis: #b9a98a; --border: rgba(60,40,20,0.14); --border-strong: rgba(60,40,20,0.28);
-  --accent: #9c4a22; --accent-ink: #fbf3e4; --brand-bg: #2b2219; --link: #7a3b1c; --focus: #b5602f;
-  --shadow: 0 1px 2px rgba(60,40,20,.08), 0 8px 24px -14px rgba(60,40,20,.25);
-  --s1: #2f5fa8; --s2: #b3303a; --s3: #3f7d4e; --s4: #c08f1f; --s5: #7a4b8f; --s6: #b86a2b; --s7: #556270; --s8: #c25a5a;
-  --de-emphasis: #b8a98c; --good-text: #3f6f2a; --critical-text: #9c2e22; --div-mid: #efe6d1;
-  --tier-silver: #7f8288; --tier-platinum: #2f8f8b; --tier-diamond: #3f6fc4; --tier-conqueror: #b1302c;
-  --font-display: "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
-}
-:root[data-theme="parchment"] body, .theme-parchment.themed { background: radial-gradient(ellipse at 50% -10%, #f3ead6 0%, var(--page) 60%); }
-:root[data-theme="parchment"] :is(h1, h2, h3, h4), .theme-parchment :is(h1, h2, h3, h4) { letter-spacing: .005em; }
-:root[data-theme="parchment"] .card-head, .theme-parchment .card-head { border-bottom: 1px solid var(--border-strong); padding-bottom: 8px; }
-:root[data-theme="parchment"] table.data th, .theme-parchment table.data th { font-family: var(--font-display); text-transform: none; letter-spacing: 0; font-size: 13px; font-style: italic; font-weight: 600; }
-
-/* Illuminated: ink-navy night, gold leaf, an inner frame line on every card like a bordered folio. */
-:root[data-theme="manuscript"], .theme-manuscript {
-  color-scheme: dark;
-  --page: #16131f; --surface: #1f1b2b; --surface-2: #262133; --surface-3: #2f2940;
-  --ink: #efe6d3; --ink-2: #c9bda6; --muted: #948a78;
-  --grid: #2c2739; --axis: #413a52; --border: rgba(226,182,90,0.16); --border-strong: rgba(226,182,90,0.32);
-  --accent: #e2b65a; --accent-ink: #231a05; --brand-bg: #130f1b; --link: #d9b46a; --focus: #ecc777;
-  --s1: #5b7fd6; --s2: #c84a55; --s3: #4c9a6a; --s4: #e2b65a; --s5: #9d6cc0; --s6: #d1823d; --s7: #8c96ad; --s8: #e08a8a;
-  --de-emphasis: #5d566e; --div-mid: #3a3448;
-  --font-display: "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
-}
-:root[data-theme="manuscript"] :is(h1, h2, h3, h4), .theme-manuscript :is(h1, h2, h3, h4) { letter-spacing: .01em; }
-:root[data-theme="manuscript"] .card, .theme-manuscript .card { outline: 1px solid color-mix(in srgb, var(--accent) 22%, transparent); outline-offset: -5px; }
-:root[data-theme="manuscript"] .tile .value, .theme-manuscript .tile .value { font-family: var(--font-display); font-weight: 600; }
-
-/* Campaign atlas: vellum and olive, a verdigris accent, small compass marks. A quiet map table. */
-:root[data-theme="atlas"], .theme-atlas {
-  color-scheme: light;
-  --page: #e3dcc6; --surface: #f1ebd9; --surface-2: #e9e2cd; --surface-3: #ded5bb;
-  --ink: #262d27; --ink-2: #4e564e; --muted: #7a7f72;
-  --grid: #d3cab0; --axis: #aeb39a; --border: rgba(38,45,39,0.14); --border-strong: rgba(38,45,39,0.28);
-  --accent: #2f6b5e; --accent-ink: #f3f0e4; --brand-bg: #262d27; --link: #2a5f8a; --focus: #3d7f70;
-  --shadow: 0 1px 2px rgba(38,45,39,.08), 0 8px 24px -14px rgba(38,45,39,.22);
-  --s1: #2f5fa8; --s2: #b3303a; --s3: #3f7d4e; --s4: #c08f1f; --s5: #7a4b8f; --s6: #b86a2b; --s7: #556270; --s8: #c25a5a;
-  --de-emphasis: #b2b09a; --good-text: #2f6b3a; --critical-text: #9c2e22; --div-mid: #e9e2cd;
-  --tier-silver: #7f8288; --tier-platinum: #2f8f8b; --tier-diamond: #3f6fc4; --tier-conqueror: #b1302c;
-  --font-display: Georgia, "Palatino Linotype", "Times New Roman", serif;
-}
-:root[data-theme="atlas"] .card-head h2::before, :root[data-theme="atlas"] .card-head h3::before,
-.theme-atlas .card-head h2::before, .theme-atlas .card-head h3::before { content: "◆"; color: var(--accent); font-size: 9px; }
-:root[data-theme="atlas"] .card, .theme-atlas .card { border-style: solid; border-color: var(--border-strong); }
-
-/* light-scheme themes show the moon in the theme button */
-:root[data-scheme="light"] .theme-menu .moon { display: block; }
-:root[data-scheme="light"] .theme-menu .sun { display: none; }
-.theme-menu .moon { display: none; }
-.theme-menu > summary.icon-btn { padding: 0; width: 36px; height: 36px; gap: 0; }
-.theme-menu > summary::after { display: none; }
-.theme-menu .menu { left: auto; right: 0; min-width: 240px; }
-.nav-menu .menu button { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 8px 10px; border-radius: 8px; color: var(--ink-2); cursor: pointer; line-height: 1.25; font-size: 14px; font-weight: 500; }
-.nav-menu .menu button small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; margin-top: 2px; }
-.nav-menu .menu button:hover { background: var(--surface-2); color: var(--ink); }
-.nav-menu .menu button[aria-pressed="true"] { background: var(--surface-3); color: var(--ink); }
-
-/* ---------- theme lab ---------- */
-.theme-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-.theme-sample { border: 1px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; }
-.theme-sample .themed { background: var(--page); color: var(--ink); padding: 18px; min-height: 100%; }
-.theme-sample .sample-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
-.theme-sample .swatches { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 0; }
-.theme-sample .swatch-box { width: 26px; height: 26px; border-radius: 6px; border: 1px solid rgba(0,0,0,.18); }
-.theme-sample .sample-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
-@media (max-width: 900px) { .theme-grid { grid-template-columns: 1fr; } }
+/* ---------- Castle stone (chosen 9 Nov 2026): the hairline under every card title ---------- */
+.card-head { border-bottom: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); padding-bottom: 8px; }

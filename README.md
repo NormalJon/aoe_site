@@ -48,7 +48,6 @@ controls; `/cache/` and `forge.local.json` are never served.
 | `#/tournament` | Forge Cup (prototype) | Monthly Clash-style 1v1 cup: connect a profile, pick one of six weekend start times, declare a 3–5 civ pool; lock in 60–10 min before the slot; locked-in players are sorted by rating into brackets of 8; per series a mini draft (alternating map bans from a 7-map pool, one civ ban from the opponent's pool, blind civ picks revealed together, a civ you win with is locked); best-of-3 with reported results and verification against AoE4 World match history. Demo controls add real ladder players near your rating as entrants and fast-forward the clock |
 | `#/data` | Data & sources | Live reachability check, full endpoint inventory, terms, and the official-API situation |
 | `#/api` | API console | Query every source from the browser: AoE4 World, static game data, the official World's Edge API (through the companion proxy) and the companion itself. Endpoint catalogue with parameter hints and player-id lookup, raw-path mode, POST with a JSON body for Cup actions, response as a collapsible tree / raw JSON / sortable table, path and JavaScript-expression drilling, copy as URL / curl / Python / CLI, download, history and saved requests (this browser only). `tools/api.py` is the terminal twin, with a `shell` mode |
-| `#/themes` | Theme lab (Testing menu) | Design candidates side by side, each sample built from the site's own components: today's Dark and Light plus four historical directions (Castle stone, Parchment, Illuminated, Campaign atlas) as token sets in `css/styles.css`; the header's theme menu switches the whole site and remembers it in the browser |
 | `#/mygames` | My games (local companion) | Every game on your record with official counters and replay analysis: filter by mode, friend, tag, result, data availability; rows open the game summary from your perspective |
 
 Profiles also carry replay-derived **Playstyle** (identity tags with frequencies, medians for villagers by 10:00,
@@ -70,6 +69,12 @@ team, so renamed players and clan-tag changes no longer lose the game. The offic
 **map seed** (`rnd`), biome and layout ids; they are stored per game and the game summary shows the seed.
 `tools/corpus_estimate.py` counts how many games of a civ matchup or map the top-N players produce (see
 [docs/CORPUS_ESTIMATE.md](docs/CORPUS_ESTIMATE.md)).
+
+**Look.** The default theme is *Castle stone*: dark basalt surfaces, torchlight gold, headings and the wordmark in a
+system serif (Palatino Linotype / Palatino / Georgia, nothing downloaded), a gold hairline under every card title and
+chart series in heraldic tinctures (azure, gules, vert, or, purpure, tenné). The light mode is its warm-white pair.
+Both are token sets at the top of `css/styles.css`; the header toggle switches and remembers the choice. It was picked
+from four candidates (Parchment, Illuminated and Campaign atlas were the others) on 9 Nov 2026.
 
 Dark and light themes (toggle in the header, follows the OS by default). Responsive down to phone width.
 
