@@ -69,7 +69,9 @@ function renderGame(holder, d, { gameId, profile, companion, route }) {
     d.replay.available ? el('span', {}, el('strong', {}, 'Replay: '), `${d.replay.status === 'local' ? 'local game file' : d.replay.status === 'cached' ? 'official store (cached copy)' : 'official store'} (game build ${d.replay.build}) — every unit queued, building placed and technology researched, for every player. `)
       : el('span', {}, el('strong', {}, 'No replay for this game'), d.replay.status ? ` (${String(d.replay.status).replace('_', ' ')}). ` : '. ',
         companion ? 'The official store keeps replays for a limited time; local files are picked up automatically. ' : el('span', {}, 'Build orders, icon strips and timelines need the companion. ', ...companionHint(), ' ')),
-    d.counters_available ? el('span', {}, el('strong', {}, 'Official counters: '), 'kills, losses, buildings, upgrades and APM from the game servers.') : el('span', {}, el('strong', {}, 'No official counters: '), 'this game is outside the recent-match window of the official API.')));
+    d.counters_available ? el('span', {}, el('strong', {}, 'Official counters: '), 'kills, losses, buildings, upgrades and APM from the game servers.')
+      : el('span', {}, el('strong', {}, 'No official counters: '), d.apiOnly ? 'kills, losses, buildings, upgrades and APM also come through the companion.'
+        : 'this game is outside the recent-match window of the official API (about the 60 most recent matches per player).')));
 
   /* key insights */
   if (d.insights?.length) {
