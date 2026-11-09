@@ -60,10 +60,11 @@ export const PERIODS = [
   { value: '7d', label: 'Last 7 days' }, { value: '14d', label: 'Last 14 days' }, { value: '30d', label: 'Last 30 days' },
   { value: 'patch', label: 'Current patch' },
 ];
-/** ISO timestamp for the games endpoint's `since`, or null when the period is not a day count. */
+/** ISO timestamp for the games endpoint's `since`, or null when the period is not a day count.
+ *  Rounded down to the hour so the request URL, and with it the client cache key, stays stable across renders. */
 export function periodSince(period) {
   const days = { '7d': 7, '14d': 14, '30d': 30 }[period];
-  return days ? new Date(Date.now() - days * 86400e3).toISOString() : null;
+  return days ? new Date(Math.floor((Date.now() - days * 86400e3) / 3600e3) * 3600e3).toISOString() : null;
 }
 export function periodLabel(period) {
   return { '7d': 'in the last 7 days', '14d': 'in the last 14 days', '30d': 'in the last 30 days', patch: 'on the current patch' }[period] || 'season to date';

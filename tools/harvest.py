@@ -25,7 +25,8 @@ BACKOFF_START, BACKOFF_MAX = 20, 120
 
 _q = queue.Queue()
 _worker = None
-_lock = threading.Lock()
+_lock = threading.Lock()          # serialises request(): row + queue entry
+_worker_lock = threading.Lock()   # worker thread creation
 _stop = set()
 _current = None
 ACTIVE = ('queued', 'running')
@@ -38,25 +39,32 @@ def _queued(pid):
 def request(cfg, pid, pages=20):
     """Queue a harvest for `pid` unless one is already queued or running."""
     pid = int(pid)
-    h = status(pid)   # also clears a state left behind by a server restart
-    if h.get('state') in ACTIVE:
-        return h
-    store.harvest_set(pid, state='queued', message='waiting for the harvester', pages=0, games=0, candidates=0, done=0, not_found=0, errors=0,
-                      started=time.time(), finished=None)
-    _q.put((pid, max(1, min(40, int(pages or 20))), cfg))
+    with _lock:   # one request at a time: the queued row and the queue entry appear together
+        h = status(pid)   # also clears a state left behind by a server restart
+        if h.get('state') in ACTIVE:
+            return h
+        _stop.discard(pid)   # a stop pressed while nothing was running must not abort this run
+        store.harvest_set(pid, state='queued', message='waiting for the harvester', pages=0, games=0, candidates=0, done=0, not_found=0, errors=0,
+                          started=time.time(), finished=None)
+        _q.put((pid, max(1, min(40, int(pages or 20))), cfg))
     _ensure_worker()
     return status(pid)
 
 
 def stop(pid):
-    _stop.add(int(pid))
+    pid = int(pid)
+    if _current == pid or _queued(pid):   # only a live or queued run can be stopped
+        _stop.add(pid)
     return status(pid)
 
 
 def status(pid):
     pid = int(pid)
     h = store.harvest_get(pid) or {'profile_id': pid, 'state': 'idle', 'message': None}
-    if h.get('state') in ACTIVE and _current != pid and not _queued(pid):   # the worker died with the process: a restart
+    # A row still marked active while the worker neither runs nor queues it belongs to a process that died (server
+    # restart). The 5-second grace covers the instants between writing the row and queueing it, and between popping
+    # the queue and becoming current; a live run also resets `finished` when it starts.
+    if h.get('state') in ACTIVE and _current != pid and not _queued(pid) and time.time() - (h.get('updated') or 0) > 5:
         store.harvest_set(pid, state='stopped', message=f'interrupted by a server restart after {h.get("done") or 0} replays', finished=time.time())
         h = store.harvest_get(pid)
     h['stored_stats'] = store.stats_count(pid)
@@ -68,7 +76,7 @@ def status(pid):
 
 def _ensure_worker():
     global _worker
-    with _lock:
+    with _worker_lock:
         if _worker is None or not _worker.is_alive():
             _worker = threading.Thread(target=_loop, name='forge-harvest', daemon=True)
             _worker.start()
@@ -116,7 +124,7 @@ def _pause(pid, seconds):
 def _run(cfg, pid, pages):
     def progress(**f):
         store.harvest_set(pid, **f)
-    progress(state='running', message='listing games on AoE4 World')
+    progress(state='running', message='listing games on AoE4 World', finished=None)
     games = _list_all(pid, pages, progress)
     try:
         replays.official_history(pid)        # also records seed / biome / layout of the ~60 most recent matches
@@ -124,7 +132,9 @@ def _run(cfg, pid, pages):
         pass
     local = replays.local_replays(cfg)
     have = store.stats_ids(pid)
+    skip = store.unmatched_ids(pid)          # replays that twice failed to match this player's name, civ and team
     cands = [g for g in games if not g.get('ongoing') and (g.get('duration') or 0) >= MIN_DURATION and g['game_id'] not in have]
+    statuses = store.replays_for(g['game_id'] for g in cands)
     progress(candidates=len(cands), message=f'{len(cands)} games to fetch')
     done = nf = err = 0
     backoff = BACKOFF_START
@@ -133,12 +143,16 @@ def _run(cfg, pid, pages):
             progress(state='stopped', message=f'stopped after {done} replays', finished=time.time())
             return
         gid = g['game_id']
-        r = store.replay_get(gid)
+        if gid in skip:
+            err += 1
+            progress(errors=err)
+            continue
+        r = statuses.get(gid)
         if r and r['status'] == 'not_found' and time.time() - (r['last_attempt'] or 0) < 86400:
             nf += 1
             progress(not_found=nf)
             continue
-        if r and str(r['status']).startswith(('unreadable', 'name mismatch')) and (r['attempts'] or 0) >= 2:
+        if r and str(r['status']).startswith('unreadable') and (r['attempts'] or 0) >= 2:
             err += 1
             progress(errors=err)
             continue
@@ -173,8 +187,8 @@ def _run(cfg, pid, pages):
             store.replay_set(gid, f'unreadable: {e}'[:120])
             progress(errors=err)
             continue
-        pids = replays.store_perspectives(g, a, st)
-        store.replay_set(gid, st if pid in pids else 'name mismatch', path=path, duration=a.get('duration'))
+        pids = replays.store_perspectives(g, a, st)   # records the players it could not match, per player
+        store.replay_set(gid, st, path=path, duration=a.get('duration'))
         if pid in pids:
             done += 1
         else:

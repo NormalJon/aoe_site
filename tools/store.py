@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS player_stats (
 CREATE INDEX IF NOT EXISTS ps_profile ON player_stats(profile_id, started_at);
 CREATE TABLE IF NOT EXISTS mapgen (
     game_id INTEGER PRIMARY KEY, seed INTEGER, biome INTEGER, layout INTEGER, map_name TEXT, size INTEGER);
+CREATE TABLE IF NOT EXISTS unmatched (
+    game_id INTEGER, profile_id INTEGER, attempts INTEGER DEFAULT 0, last_attempt REAL, PRIMARY KEY (game_id, profile_id));
 CREATE TABLE IF NOT EXISTS harvest (
     profile_id INTEGER PRIMARY KEY, state TEXT, message TEXT, pages INTEGER DEFAULT 0, games INTEGER DEFAULT 0,
     candidates INTEGER DEFAULT 0, done INTEGER DEFAULT 0, not_found INTEGER DEFAULT 0, errors INTEGER DEFAULT 0,
@@ -58,7 +60,17 @@ def connect():
                 con.execute('PRAGMA synchronous=NORMAL')
                 con.executescript(SCHEMA)
                 _ready = True
+                try:
+                    migrate_from_json()   # before anything else writes, so the old caches never overwrite newer rows
+                except Exception:  # noqa: BLE001
+                    pass
     return con
+
+
+def _chunks(items, n=500):
+    items = list(items)
+    for i in range(0, len(items), n):
+        yield items[i:i + n]
 
 
 def _players_of(game):
@@ -147,6 +159,19 @@ def replay_set(game_id, status, path=None, duration=None):
                     (int(game_id), status, str(path) if path else None, time.time(), duration))
 
 
+def replays_for(game_ids):
+    """Fetch state for many games in one query: {game_id: row dict}."""
+    out = {}
+    ids = [int(g) for g in game_ids]
+    if not ids:
+        return out
+    with closing(connect()) as con:
+        for chunk in _chunks(ids):
+            for r in con.execute(f"SELECT * FROM replays WHERE game_id IN ({','.join('?' * len(chunk))})", chunk):
+                out[r['game_id']] = dict(r)
+    return out
+
+
 def replays_status_counts():
     with closing(connect()) as con:
         return {r['status']: r['n'] for r in con.execute('SELECT status, COUNT(*) AS n FROM replays GROUP BY status')}
@@ -160,10 +185,60 @@ def mapgen_set(game_id, seed=None, biome=None, layout=None, map_name=None, size=
                     (int(game_id), seed, biome, layout, map_name, size))
 
 
+def mapgen_set_many(rows):
+    """rows: iterable of dicts with game_id, seed, biome, layout, map_name, size. Existing rows are kept (seeds do not change)."""
+    rows = list(rows)
+    if not rows:
+        return
+    with closing(connect()) as con:
+        con.execute('BEGIN')
+        for m in rows:
+            con.execute('INSERT OR IGNORE INTO mapgen (game_id, seed, biome, layout, map_name, size) VALUES (?,?,?,?,?,?)',
+                        (int(m['game_id']), m.get('seed'), m.get('biome'), m.get('layout'), m.get('map_name'), m.get('size')))
+        con.execute('COMMIT')
+
+
+def mapgen_missing(game_ids):
+    """The subset of `game_ids` that has no mapgen row yet."""
+    ids = {int(g) for g in game_ids}
+    if not ids:
+        return set()
+    have = set()
+    with closing(connect()) as con:
+        for chunk in _chunks(ids):
+            have.update(r['game_id'] for r in con.execute(f"SELECT game_id FROM mapgen WHERE game_id IN ({','.join('?' * len(chunk))})", chunk))
+    return ids - have
+
+
 def mapgen_get(game_id):
     with closing(connect()) as con:
         r = con.execute('SELECT * FROM mapgen WHERE game_id = ?', (int(game_id),)).fetchone()
     return dict(r) if r else None
+
+
+# ----------------------------------------------------------------------------- players a replay could not be matched to
+# A replay's players carry display names, not ids; when neither the name nor civ+team pins an API player down, that
+# (game, player) pair is recorded here. It is per player: the same replay may match everyone else in the game.
+
+def unmatched_bump(game_id, profile_id):
+    with closing(connect()) as con:
+        con.execute('INSERT INTO unmatched (game_id, profile_id, attempts, last_attempt) VALUES (?,?,1,?) '
+                    'ON CONFLICT(game_id, profile_id) DO UPDATE SET attempts = unmatched.attempts + 1, last_attempt = excluded.last_attempt',
+                    (int(game_id), int(profile_id), time.time()))
+
+
+def unmatched_clear(game_id, profile_ids):
+    ids = [int(p) for p in profile_ids]
+    if not ids:
+        return
+    with closing(connect()) as con:
+        con.execute(f"DELETE FROM unmatched WHERE game_id = ? AND profile_id IN ({','.join('?' * len(ids))})", (int(game_id), *ids))
+
+
+def unmatched_ids(profile_id, min_attempts=2):
+    """Games whose replay has failed to match this player `min_attempts` times: not worth re-parsing on every call."""
+    with closing(connect()) as con:
+        return {r['game_id'] for r in con.execute('SELECT game_id FROM unmatched WHERE profile_id = ? AND attempts >= ?', (int(profile_id), int(min_attempts)))}
 
 
 # ----------------------------------------------------------------------------- per-player per-game summaries
@@ -174,15 +249,16 @@ def stats_put(game_id, profile_id, summary):
                     (int(game_id), int(profile_id), summary.get('v') or 0, summary.get('started_at'), summary.get('civ'), summary.get('kind'), json.dumps(summary, ensure_ascii=False)))
 
 
-def stats_put_many(rows):
-    """rows: iterable of (game_id, profile_id, summary)."""
+def stats_put_many(rows, replace=True):
+    """rows: iterable of (game_id, profile_id, summary). `replace=False` keeps rows that already exist (used by the import)."""
     rows = list(rows)
     if not rows:
         return
+    verb = 'INSERT OR REPLACE' if replace else 'INSERT OR IGNORE'
     with closing(connect()) as con:
         con.execute('BEGIN')
         for gid, pid, s in rows:
-            con.execute('INSERT OR REPLACE INTO player_stats (game_id, profile_id, v, started_at, civ, kind, json) VALUES (?,?,?,?,?,?,?)',
+            con.execute(f'{verb} INTO player_stats (game_id, profile_id, v, started_at, civ, kind, json) VALUES (?,?,?,?,?,?,?)',
                         (int(gid), int(pid), s.get('v') or 0, s.get('started_at'), s.get('civ'), s.get('kind'), json.dumps(s, ensure_ascii=False)))
         con.execute('COMMIT')
 
@@ -266,7 +342,8 @@ def migrate_from_json(cache_dir=CACHE):
     imported = {'games': 0, 'stats': 0, 'missing': 0}
     for f in sorted((cache_dir / 'data').glob('games_*.json')):
         try:
-            imported['games'] += upsert_games(json.loads(f.read_text(encoding='utf-8')))
+            games = json.loads(f.read_text(encoding='utf-8'))
+            imported['games'] += upsert_games([g for g in games if g and g.get('game_id') and game(g['game_id']) is None])   # only games the store has not seen
         except Exception:  # noqa: BLE001
             pass
     for f in sorted((cache_dir / 'analysis').glob('profile_*.json')):
@@ -275,7 +352,7 @@ def migrate_from_json(cache_dir=CACHE):
             st = json.loads(f.read_text(encoding='utf-8'))
         except Exception:  # noqa: BLE001
             continue
-        stats_put_many((int(gid), pid, s) for gid, s in (st.get('analysed') or {}).items())
+        stats_put_many(((int(gid), pid, s) for gid, s in (st.get('analysed') or {}).items()), replace=False)   # never overwrite rows the store already has
         imported['stats'] += len(st.get('analysed') or {})
         for gid, m in (st.get('missing') or {}).items():
             status = m.get('status') or 'error'

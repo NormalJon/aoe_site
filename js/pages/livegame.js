@@ -57,7 +57,7 @@ export function liveGamePanel({ player, gamesP }) {
     } catch (e) { metaEl.textContent = `check failed: ${e.message || e}`; }
     checking = false; checkBtn.disabled = false;
   }
-  function start() { stopTimers(); timer = setInterval(() => { if (!document.hidden) check(true); }, POLL_MS); clock = setInterval(tick, 1000); }
+  function start() { if (stopped) return; stopTimers(); timer = setInterval(() => { if (!document.hidden) check(true); }, POLL_MS); clock = setInterval(tick, 1000); }   // never after stop(): the page may already be gone
   function stopTimers() { clearInterval(timer); clearInterval(clock); timer = clock = null; }
   const onVis = () => { if (!document.hidden) check(true); };
   document.addEventListener('visibilitychange', onVis);

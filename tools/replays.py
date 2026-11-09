@@ -342,11 +342,12 @@ def api_game(me, game_id):
     return cached_json(f'game_{game_id}', A4W + f'players/{me}/games/{game_id}', 30 * 86400)
 
 
-def player_games(pid, pages=2, refresh=False):
-    """Recent games of any player (newest first), cached 10 minutes."""
+def player_games(pid, pages=2, refresh=False, with_meta=False):
+    """Recent games of any player (newest first), cached 10 minutes. With `with_meta`, returns (games, fetched_now)."""
     p = CACHE / 'data' / f'games_{pid}_p{pages}.json'
     if p.exists() and not refresh and time.time() - p.stat().st_mtime < 600:
-        return json.loads(p.read_text(encoding='utf-8'))
+        games = json.loads(p.read_text(encoding='utf-8'))
+        return (games, False) if with_meta else games
     games, page = [], 1
     while page <= pages:
         d = json.loads(http_get(A4W + f'players/{pid}/games?limit=50&page={page}'))
@@ -355,7 +356,7 @@ def player_games(pid, pages=2, refresh=False):
             break
         page = d['next_page']
     p.write_text(json.dumps(games), encoding='utf-8')
-    return games
+    return (games, True) if with_meta else games
 
 
 def official_history(me, refresh=False):
@@ -363,7 +364,14 @@ def official_history(me, refresh=False):
     d = cached_json(f'history_{me}', WE + 'leaderboard/getRecentMatchHistory?' + urllib.parse.urlencode({'title': 'age4', 'profile_ids': json.dumps([int(me)])}), 0 if refresh else 300)
     aliases = {p['profile_id']: p.get('alias') for p in d.get('profiles') or []}
     out = {}
-    for m in d.get('matchHistoryStats') or []:
+    stats = d.get('matchHistoryStats') or []
+    mid = lambda m: int(m['id']) if str(m.get('id', '')).isdigit() else None  # noqa: E731
+    try:
+        need = store.mapgen_missing(i for i in (mid(m) for m in stats) if i is not None)   # decode options only for games without a seed yet
+    except Exception:  # noqa: BLE001
+        need = set()
+    mg_rows = []
+    for m in stats:
         members = {x['profile_id']: x for x in m.get('matchhistorymember') or []}
         dur = max(1, (m.get('completiontime') or 0) - (m.get('startgametime') or 0))
         rows = {}
@@ -380,13 +388,15 @@ def official_history(me, refresh=False):
                 'apm': round((c.get('totalcmds') or 0) / (dur / 60)) if c.get('totalcmds') else None,
                 'rating_before': mem.get('oldrating'), 'rating_after': mem.get('newrating'), 'xp': r.get('xpgained'),
             }
-        mg = _mapgen(m)
+        mg = _mapgen(m) if mid(m) in need else None
         if mg:
-            try:
-                store.mapgen_set(int(m['id']), **mg)
-            except Exception:  # noqa: BLE001
-                pass
-        out[m['id']] = {'duration': dur, 'matchtype_id': m.get('matchtype_id'), 'players': rows, 'has_replay_urls': bool(m.get('matchurls')), 'mapgen': mg}
+            mg_rows.append({'game_id': mid(m), **mg})
+        out[m['id']] = {'duration': dur, 'matchtype_id': m.get('matchtype_id'), 'players': rows, 'has_replay_urls': bool(m.get('matchurls'))}
+    if mg_rows:
+        try:
+            store.mapgen_set_many(mg_rows)   # one transaction for the whole history
+        except Exception:  # noqa: BLE001
+            pass
     return out
 
 
@@ -815,11 +825,12 @@ def game_detail(cfg, game_id, fetch=False, profile=None):
             pass
     ps = _players_of(game)
     duration = game.get('duration') or (analysis or {}).get('duration')
-    # join replay players to API players by name (replays carry display names, not profile ids)
-    by_name = {p['name']: p for p in (analysis or {}).get('players', [])}
+    # join replay players to API players: by name, then by civ and team (replay names lag renames and clan tags),
+    # the same way the store does, so the page and the profile agree on who has replay data
+    pair = {p['profile_id']: rp for p, rp in match_players(game, analysis)} if analysis else {}
     players = []
     for p in ps:
-        rp = by_name.get(p['name'])
+        rp = pair.get(p['profile_id'])
         row = {**p, 'counters': counters.get(p['profile_id']), 'replay': rp, 'tags': []}
         if rp:
             row['tags'] += player_tags(rp, duration or 0, (analysis or {}).get('players', []))
@@ -972,6 +983,12 @@ def store_perspectives(g, a, status):
         except Exception:  # noqa: BLE001
             continue
     store.stats_put_many(rows)
+    gid = g['game_id']
+    if pids:
+        store.unmatched_clear(gid, pids)
+    for p in _players_of(g):   # the rest could not be pinned to a replay player this time; recorded per player
+        if p.get('profile_id') is not None and p['profile_id'] not in pids:
+            store.unmatched_bump(gid, p['profile_id'])
     return pids
 
 
@@ -1198,9 +1215,9 @@ def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False, civ=None, v
     `civ` keeps only games the player played as that civ; `vs` only games with an opponent on that civ (together: a
     matchup); `kinds` only games of those kinds (e.g. ['rm_1v1'])."""
     pid = int(pid)
-    store.migrate_from_json()   # first run after the store was introduced: import the JSON caches once
-    games = player_games(pid, pages=4 if (civ or vs or kinds) else 2, refresh=refresh)   # a specific civ, matchup or mode may be rare: look further back
-    store.upsert_games(games)
+    games, fetched = player_games(pid, pages=4 if (civ or vs or kinds) else 2, refresh=refresh, with_meta=True)   # a specific civ, matchup or mode may be rare: look further back
+    if fetched or (games and store.game(games[0]['game_id']) is None):   # the store only needs the list when it changed
+        store.upsert_games(games)
     def me_in(g):
         return next((p for t in g.get('teams') or [] for x in t for p in [x.get('player', x)] if p['profile_id'] == pid), None)
     def vs_ok(opps):
@@ -1216,21 +1233,37 @@ def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False, civ=None, v
                 and (not civ or (me_in(g) or {}).get('civilization') == civ) and vs_ok(_opponents(g, pid))]
     local = local_replays(cfg)
     matches = lambda s: (not civ or s.get('civ') == civ) and vs_ok(s.get('opponents')) and kind_ok(s.get('kind'))  # noqa: E731
+
+    def load_rows():
+        """This player's stored summaries; rows from before the `opponents` field existed get it from the game record."""
+        rows_, fixes = store.stats_for(pid, civ=civ, kinds=kinds), []
+        for s in rows_:
+            if 'opponents' not in s and s['game_id'] in by_id:
+                s['opponents'] = _opponents(by_id[s['game_id']], pid)
+                fixes.append((s['game_id'], pid, s))
+        if fixes:
+            store.stats_put_many(fixes)
+        return rows_
+    all_rows = load_rows()
     have = store.stats_ids(pid)
+    skip = store.unmatched_ids(pid)                                    # replays that twice failed to match this player
+    statuses = store.replays_for(g['game_id'] for g in finished)       # one query instead of one per candidate
+    added = False
     # summaries written before newer fields existed are rebuilt from the cached analysis (every perspective at once)
-    for s in store.stats_for(pid, civ=civ, kinds=kinds):
+    for s in all_rows:
         if (s.get('v') or 0) >= SUMMARY_V or s['game_id'] not in by_id or not local.get(s['game_id']):
             continue
         try:
             store_perspectives(by_id[s['game_id']], analyze_replay(local[s['game_id']]), s.get('source', 'cached'))
+            added = True
         except Exception:  # noqa: BLE001
             pass
     deadline = time.time() + budget
     rate_limited = False
-    n_have = sum(1 for s in store.stats_for(pid, civ=civ, kinds=kinds) if matches(s))
+    n_have = sum(1 for s in all_rows if matches(s))
     for g in finished:
         gid = g['game_id']
-        if gid in have or _unavailable(store.replay_get(gid)):
+        if gid in have or gid in skip or _unavailable(statuses.get(gid)):
             continue
         if n_have >= want or time.time() > deadline:
             break
@@ -1247,19 +1280,23 @@ def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False, civ=None, v
                 rate_limited = True
                 break
             store.replay_set(gid, status)
+            statuses[gid] = store.replay_get(gid)
             continue
         try:
             a = analyze_replay(path)
         except Exception as e:  # noqa: BLE001
             store.replay_set(gid, f'unreadable: {e}'[:120])
+            statuses[gid] = store.replay_get(gid)
             continue
-        pids = store_perspectives(g, a, status)   # every player in the replay, not just this one
-        store.replay_set(gid, status if pid in pids else 'name mismatch', path=path, duration=a.get('duration'))
+        pids = store_perspectives(g, a, status)   # every player in the replay, not just this one; unmatched ones are recorded per player
+        store.replay_set(gid, status, path=path, duration=a.get('duration'))
         if pid in pids:
             have.add(gid)
             n_have += 1
-
-    rows = [s for s in store.stats_for(pid, civ=civ, kinds=kinds) if matches(s)]   # newest first
+            added = True
+    if added:
+        all_rows = load_rows()
+    rows = [s for s in all_rows if matches(s)]   # newest first
     n = len(rows)
     tag_counts, labels = Counter(), {}
     for s in rows:
@@ -1332,7 +1369,7 @@ def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False, civ=None, v
         'longest_win_streak': {'value': best_streak, 'game_id': best_end['game_id'] if best_end else None, 'started_at': best_end['started_at'] if best_end else None} if best_streak else None,
         'biggest_upset': {'value': upset[0], 'game_id': upset[1]['game_id'], 'map': upset[1]['map'], 'started_at': upset[1]['started_at']} if upset else None,
     }
-    missing_ids = {g['game_id'] for g in finished if g['game_id'] not in have and _unavailable(store.replay_get(g['game_id']))}
+    missing_ids = {g['game_id'] for g in finished if g['game_id'] not in have and (g['game_id'] in skip or _unavailable(statuses.get(g['game_id'])))}
     remaining = [g for g in finished if g['game_id'] not in have and g['game_id'] not in missing_ids]
     pending = min(max(0, want - n), len(remaining))
     # scouting aggregates: what this player builds (optionally as one civ)
@@ -1377,7 +1414,7 @@ def _unavailable(r):
     st = str(r.get('status') or '')
     if st == 'not_found':
         return time.time() - (r.get('last_attempt') or 0) < 86400
-    return st.startswith(('unreadable', 'name mismatch')) and (r.get('attempts') or 0) >= 2
+    return st.startswith('unreadable') and (r.get('attempts') or 0) >= 2   # a player that did not match is tracked per player (store.unmatched)
 
 
 def scan_and_analyze(cfg):
