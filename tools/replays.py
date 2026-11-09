@@ -1397,7 +1397,21 @@ def playstyle_profile(cfg, pid, want=10, budget=20.0, refresh=False, civ=None, v
         'second_tc_time': _median([(s.get('town_centers') or [None])[0] for s in rows]),
     }
     wins = sum(1 for s in rows if s.get('result') == 'win')
+    # what the games on record look like, per opponent civ and per map, within the current filter: lets the compare
+    # page say "3 French vs Byzantines games on record, 2 analysed" instead of making the user search a dropdown
+    by_opponent, by_map = {}, {}
+    for g in finished:
+        for c in {o.get('civilization') for o in _opponents(g, pid) if o.get('civilization')}:
+            by_opponent.setdefault(c, {'on_record': 0, 'analysed': 0})['on_record'] += 1
+        if g.get('map'):
+            by_map.setdefault(g['map'], {'on_record': 0, 'analysed': 0})['on_record'] += 1
+    for s in rows:
+        for c in {o.get('civilization') for o in s.get('opponents') or [] if o.get('civilization')}:
+            by_opponent.setdefault(c, {'on_record': 0, 'analysed': 0})['analysed'] += 1
+        if s.get('map'):
+            by_map.setdefault(s['map'], {'on_record': 0, 'analysed': 0})['analysed'] += 1
     return {
+        'by_opponent': by_opponent, 'by_map': by_map,
         'profile_id': pid, 'civ': civ, 'vs': vs, 'kinds': kinds, 'analysed': n, 'wins': wins, 'losses': sum(1 for s in rows if s.get('result') == 'loss'), 'candidates': len(finished), 'games_scanned': len(all_games), 'missing': len(missing_ids), 'want': want, 'pending': pending, 'rate_limited': rate_limited,
         'stored': store.stats_count(pid), 'harvest': store.harvest_get(pid),
         'tags': tags, 'medians': medians, 'composition': composition, 'unit_mix': unit_mix, 'early_buildings': early_buildings, 'openings': openings, 'records': records, 'api_records': api_records,

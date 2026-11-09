@@ -69,12 +69,13 @@ export function timingsSection({ A, B, mA, mB, modeKey, route }) {
   const civOf = (v, fallback) => (CIVS[v] ? v : v === 'all' ? '' : fallback);
   const poolB = new Set((mB.civilizations || []).map(c => c.civilization));
   const kind = KIND_FOR_MODE[modeKey] || '';
-  const state = { ca: civOf(q.ca, mostPlayed(mA)), vs: CIVS[q.vs] ? q.vs : '', ga: q.ga || null, gb: q.gb || null, mins: ['10', '15', '20'].includes(q.mins) ? Number(q.mins) : 10, kinds: new Set(['train', 'build', 'research']) };
+  const state = { ca: civOf(q.ca, mostPlayed(mA)), vs: CIVS[q.vs] ? q.vs : '', ga: q.ga || null, gb: q.gb || null, gbManual: !!q.gb, mins: ['10', '15', '20'].includes(q.mins) ? Number(q.mins) : 10,
+    view: q.view === 'minute' ? 'minute' : 'time', kinds: new Set(['train', 'build', 'research']) };
   state.cb = civOf(q.cb, state.ca && poolB.has(state.ca) ? state.ca : (mostPlayed(mB) || state.ca));   // the same civ as A when B plays it: like with like
   const wants = { a: WANT, b: WANT };
   let sides = null, seq = 0, boardSeq = 0;
 
-  const syncUrl = () => history.replaceState(null, '', hrefTo(`/compare/${a}/${b}`, { mode: q.mode, ca: state.ca || 'all', cb: state.cb || 'all', vs: state.vs || undefined, ga: state.ga || undefined, gb: state.gb || undefined, mins: state.mins === 10 ? undefined : String(state.mins) }));
+  const syncUrl = () => history.replaceState(null, '', hrefTo(`/compare/${a}/${b}`, { mode: q.mode, ca: state.ca || 'all', cb: state.cb || 'all', vs: state.vs || undefined, ga: state.ga || undefined, gb: state.gbManual ? state.gb || undefined : undefined, mins: state.mins === 10 ? undefined : String(state.mins), view: state.view === 'minute' ? 'minute' : undefined }));
 
   const civOptions = m => {
     const pool = [...(m.civilizations || [])].sort((x, y) => y.games_count - x.games_count);
@@ -174,27 +175,61 @@ export function timingsSection({ A, B, mA, mB, modeKey, route }) {
     const opp = oppCivs(g);
     return `${fmt.date(g.started_at)} · ${g.map} · ${civShort(g.civ)} vs ${opp.length ? opp.slice(0, 2).map(civShort).join(' + ') + (opp.length > 2 ? ' …' : '') : '?'} · ${g.result === 'win' ? 'W' : g.result === 'loss' ? 'L' : '?'} · ${fmt.duration(g.duration)}`;
   };
+  const findGame = (list, id) => list.find(g => String(g.game_id) === String(id));
+  const sameMatchup = (g, oppCiv) => !!oppCiv && oppCivs(g).includes(oppCiv);
   function pickDefaults() {
     const gA = sides[0].d.games, gB = sides[1].d.games;
-    if (!gA.find(g => String(g.game_id) === String(state.ga))) state.ga = gA[0]?.game_id ?? null;
-    if (!gB.find(g => String(g.game_id) === String(state.gb))) {
-      const want = oppCivs(gA.find(g => String(g.game_id) === String(state.ga)) || {})[0];   // prefer the same opponent civ as A's game
-      state.gb = ((want && gB.find(g => oppCivs(g).includes(want))) || gB[0])?.game_id ?? null;
+    if (!findGame(gA, state.ga)) { state.ga = gA[0]?.game_id ?? null; state.gbManual = false; }
+    const a0 = findGame(gA, state.ga), oppA = a0 ? oppCivs(a0)[0] : null, mapA = a0?.map;
+    if (!state.gbManual || !findGame(gB, state.gb)) {
+      // B follows A's game: the same matchup on the same map, then the same matchup, then the same map, then the newest
+      const pick = gB.find(g => sameMatchup(g, oppA) && g.map === mapA) || gB.find(g => sameMatchup(g, oppA)) || gB.find(g => g.map === mapA) || gB[0];
+      state.gb = pick?.game_id ?? null;
+      state.gbManual = false;
     }
+  }
+  /** B's games grouped so the matchup A is in comes first and is counted, then the same map, then the rest. */
+  function groupedOptions(games, oppA, mapA) {
+    const opt = g => ({ value: String(g.game_id), label: gameLabel(g) });
+    const same = games.filter(g => sameMatchup(g, oppA)), map = games.filter(g => !sameMatchup(g, oppA) && g.map === mapA), rest = games.filter(g => !sameMatchup(g, oppA) && g.map !== mapA);
+    const groups = [];
+    if (same.length) groups.push({ label: `Same matchup · ${civShort(same[0].civ)} vs ${civShort(oppA)} (${same.length})`, options: same.map(opt) });
+    if (map.length) groups.push({ label: `Same map · ${mapA} (${map.length})`, options: map.map(opt) });
+    if (rest.length) groups.push({ label: groups.length ? `Other games (${rest.length})` : 'Games', options: rest.map(opt) });
+    return groups;
+  }
+  /** One line answering "does B have A's matchup at all?", from the companion's per-opponent counts of games on record. */
+  function matchupLine(a0) {
+    const oppA = a0 ? oppCivs(a0)[0] : null;
+    if (!oppA) return null;
+    const sb = sides[1], civB = sb.used.civ || sb.d.games[0]?.civ;
+    const rec = sb.d.by_opponent?.[oppA] || { on_record: 0, analysed: 0 };
+    const mu = `${civB ? civShort(civB) : 'their civ'} vs ${civShort(oppA)}`;
+    const line = el('div', { class: 'muted small matchup-line' }, el('strong', {}, B.name), ` as ${mu}: `);
+    if (!rec.on_record) line.append(`none among the recent ${civB ? `${civShort(civB)} ` : ''}games on record, so the list shows other games.`);
+    else {
+      line.append(el('strong', {}, `${rec.analysed} analysed of ${rec.on_record} on record`));
+      if (rec.on_record > rec.analysed || state.vs !== oppA) line.append(' · ', el('button', { class: 'linkish', type: 'button', title: 'Filter both players to this matchup; replays not yet analysed are fetched', onClick: () => { state.vs = oppA; state.ga = state.gb = null; state.gbManual = false; reload(); } }, rec.on_record > rec.analysed ? `analyse the other ${rec.on_record - rec.analysed} and focus on ${mu}` : `focus both sides on ${mu}`));
+    }
+    return line;
   }
   function drawBoard() {
     clear(boardBox);
     pickDefaults(); syncUrl();
     const gA = sides[0].d.games, gB = sides[1].d.games;
     if (!gA.length || !gB.length) { boardBox.append(card('Game by game', emptyState('Both players need at least one analysed game for the side-by-side view.'), { level: 3 })); return; }
-    const pick = (P, games, key) => select(games.map(g => ({ value: String(g.game_id), label: gameLabel(g) })), String(state[key]), v => { state[key] = v; drawBoard(); }, { ariaLabel: `${P.name}’s game` });
+    const a0 = findGame(gA, state.ga), oppA = a0 ? oppCivs(a0)[0] : null, mapA = a0?.map;
+    const pickA = select(gA.map(g => ({ value: String(g.game_id), label: gameLabel(g) })), String(state.ga), v => { state.ga = v; state.gbManual = false; drawBoard(); }, { ariaLabel: `${A.name}’s game` });
+    const pickB = select(groupedOptions(gB, oppA, mapA), String(state.gb), v => { state.gb = v; state.gbManual = true; drawBoard(); }, { ariaLabel: `${B.name}’s game` });
     const chips = el('div', { class: 'tags' }, [['train', 'Units'], ['build', 'Buildings'], ['research', 'Technologies']].map(([k, label]) =>
       el('button', { type: 'button', class: `chip ${state.kinds.has(k) ? 'on' : ''}`, 'aria-pressed': String(state.kinds.has(k)), onClick: () => { if (state.kinds.has(k)) state.kinds.delete(k); else state.kinds.add(k); drawBoard(); } }, label)));
     const controls2 = el('div', { class: 'filters', style: { marginBottom: '10px' } },
-      el('label', {}, `${A.name}: `, pick(A, gA, 'ga')), el('label', {}, `${B.name}: `, pick(B, gB, 'gb')), el('span', { class: 'spacer' }), chips,
+      el('label', {}, `${A.name}: `, pickA), el('label', {}, `${B.name}: `, pickB), el('span', { class: 'spacer' }), chips,
+      segmented([{ value: 'time', label: 'One clock' }, { value: 'minute', label: 'By minute' }], state.view, v => { state.view = v; drawBoard(); }, { ariaLabel: 'Board layout' }),
       segmented(MINUTE_OPTS, String(state.mins), v => { state.mins = Number(v); drawBoard(); }, { ariaLabel: 'Minutes shown' }));
     const grid = el('div', { class: 'bo-board-wrap' }, skeleton(8));
-    boardBox.append(card(`Game by game · first ${state.mins} minutes`, el('div', {}, controls2, grid), { level: 3, meta: 'every order from each replay, aligned by minute · running totals at the end of each minute' }));
+    boardBox.append(card(`Game by game · first ${state.mins} minutes`, el('div', {}, controls2, matchupLine(a0), grid),
+      { level: 3, meta: state.view === 'time' ? 'both replays on one clock: each order sits in its player’s lane at its own time, and orders within 5 s of each other share a row' : 'every order from each replay, grouped by minute · running totals at the end of each minute' }));
     const my = ++boardSeq;
     Promise.all([getJSON(gameUrl(state.ga, a), { ttl: 5 * 60e3 }), getJSON(gameUrl(state.gb, b), { ttl: 5 * 60e3 })]).then(([da, db]) => {
       if (my !== boardSeq || !grid.isConnected) return;
@@ -208,25 +243,51 @@ export function timingsSection({ A, B, mA, mB, modeKey, route }) {
       const team = d.teams.find(t => t.includes(p)) || [];
       return { P, d, color, p, rp: p?.replay, opps: all.filter(x => !team.includes(x)) };
     });
-    const board = el('div', { class: 'bo-board two' });
+    const board = el('div', { class: `bo-board two ${state.view}` });
     for (const s of cols) {
       board.append(el('div', { class: 'bo-head' },
         el('div', { class: 'who' }, el('i', { class: 'dot', style: { background: s.color } }), el('a', { href: hrefTo(`/player/${s.P.profile_id}`) }, s.P.name), resultPill(s.p?.result)),
         el('div', { class: 'muted small team' }, s.p ? civChip(s.p.civilization, { name: 'short' }) : null, 'vs', ...s.opps.slice(0, 3).map(o => civChip(o.civilization, { name: 'short' })),
-          `· ${s.d.game.map} · ${fmt.date(s.d.game.started_at)} · `, el('a', { href: hrefTo(`/game/${s.d.game.game_id}`, { p: s.P.profile_id }) }, 'Summary ›'))));
+          `· ${s.d.game.map} · ${fmt.date(s.d.game.started_at)}`, s.d.mapgen?.seed ? el('span', { title: 'match seed from the official match options; ranked seeds are random per game' }, ` · seed ${s.d.mapgen.seed}`) : null, ' · ',
+          el('a', { href: hrefTo(`/game/${s.d.game.game_id}`, { p: s.P.profile_id }) }, 'Summary ›'))));
     }
     const limit = state.mins;
     const totals = cols.map(s => s.rp ? runningTotals(s.rp.events, s.d.blueprints, limit) : null);
-    const byMin = cols.map(s => s.rp ? groupEvents(s.rp.events.filter(e => state.kinds.has(e.k))) : new Map());
-    for (let m = 0; m < limit; m++) {
-      board.append(el('div', { class: 'bo-minute', style: { gridColumn: '1 / -1' } }, `${m}:00`));
-      cols.forEach((s, i) => {
-        if (!s.rp) { board.append(el('div', { class: 'bo-cell events' }, m === 0 ? el('div', { class: 'muted small', style: { padding: '2px 6px' } }, `No replay for this game (${String(s.d.replay?.status || 'unavailable').replace('_', ' ')}).`) : null)); return; }
-        const evs = byMin[i].get(m) || [], t = totals[i][m];
-        board.append(el('div', { class: 'bo-cell events' },
-          el('div', { class: 'bo-tot muted small num' }, `by ${m + 1}:00 · ${t.villagers} villager${t.villagers === 1 ? '' : 's'} · ${t.military} military · ${t.buildings} building${t.buildings === 1 ? '' : 's'}`),
-          evs.length ? evs.map(ev => eventEl(ev, s.d.blueprints, s.rp.ages)) : el('div', { class: 'muted small', style: { padding: '2px 6px' } }, 'nothing queued, placed or researched')));
-      });
+    const minuteHead = m => el('div', { class: 'bo-minute', style: { gridColumn: '1 / -1' } }, `${m}:00`);
+    const totLine = (i, m) => { const t = totals[i][m]; return el('div', { class: 'bo-tot muted small num' }, `by ${m + 1}:00 · ${t.villagers} villager${t.villagers === 1 ? '' : 's'} · ${t.military} military · ${t.buildings} building${t.buildings === 1 ? '' : 's'}`); };
+    const noReplay = s => el('div', { class: 'muted small', style: { padding: '2px 6px' } }, `No replay for this game (${String(s.d.replay?.status || 'unavailable').replace('_', ' ')}).`);
+    if (state.view === 'minute') {
+      const byMin = cols.map(s => s.rp ? groupEvents(s.rp.events.filter(e => state.kinds.has(e.k))) : new Map());
+      for (let m = 0; m < limit; m++) {
+        board.append(minuteHead(m));
+        cols.forEach((s, i) => {
+          if (!s.rp) { board.append(el('div', { class: 'bo-cell events' }, m === 0 ? noReplay(s) : null)); return; }
+          const evs = byMin[i].get(m) || [];
+          board.append(el('div', { class: 'bo-cell events' }, totLine(i, m),
+            evs.length ? evs.map(ev => eventEl(ev, s.d.blueprints, s.rp.ages)) : el('div', { class: 'muted small', style: { padding: '2px 6px' } }, 'nothing queued, placed or researched')));
+        });
+      }
+    } else {
+      // One clock: both players' orders sorted by time, each in its own lane. An order from the other lane within
+      // PAIR_S seconds of the row's first order joins that row, so near-simultaneous moves sit side by side.
+      const PAIR_S = 5;
+      if (cols.some(s => !s.rp)) cols.forEach(s => board.append(el('div', { class: 'bo-cell events lane' }, s.rp ? null : noReplay(s))));
+      const merged = cols.flatMap((s, lane) => (s.rp ? s.rp.events.filter(e => state.kinds.has(e.k) && e.t < limit * 60) : []).map(e => ({ e, lane }))).sort((x, y) => x.e.t - y.e.t);
+      const rowsByMinute = new Map();
+      for (const x of merged) {
+        const m = Math.floor(x.e.t / 60);
+        if (!rowsByMinute.has(m)) rowsByMinute.set(m, []);
+        const rows = rowsByMinute.get(m), last = rows.at(-1);
+        if (last && !last.lanes[x.lane] && x.e.t - last.t <= PAIR_S) last.lanes[x.lane] = x.e;
+        else rows.push({ t: x.e.t, lanes: { [x.lane]: x.e } });
+      }
+      for (let m = 0; m < limit; m++) {
+        board.append(minuteHead(m));
+        const rows = rowsByMinute.get(m) || [];
+        if (!rows.length) cols.forEach(s => board.append(el('div', { class: 'bo-cell events lane' }, s.rp ? el('div', { class: 'muted small', style: { padding: '2px 6px' } }, 'nothing') : null)));
+        for (const r of rows) cols.forEach((s, i) => board.append(el('div', { class: `bo-cell events lane ${r.lanes[i] ? '' : 'empty'}` }, r.lanes[i] ? eventEl(r.lanes[i], s.d.blueprints, s.rp.ages) : null)));
+        cols.forEach((s, i) => board.append(el('div', { class: 'bo-cell tot' }, s.rp ? totLine(i, m) : el('span', { class: 'muted small' }, '—'))));
+      }
     }
     board.append(el('div', { class: 'bo-minute', style: { gridColumn: '1 / -1' } }, 'Age-ups in this game'));
     for (const s of cols) {

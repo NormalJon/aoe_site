@@ -202,9 +202,11 @@ export function subTabs(options, current, onChange) {
   for (const o of options) tabs.append(el('button', { type: 'button', role: 'tab', 'aria-selected': String(o.value === current), onClick: () => onChange(o.value) }, o.label));
   return tabs;
 }
+/** A <select>. `options` are {value, label}; an entry with `options: [...]` becomes an <optgroup> with that label. */
 export function select(options, value, onChange, { ariaLabel } = {}) {
   const s = el('select', { 'aria-label': ariaLabel, onChange: e => onChange(e.target.value) });
-  for (const o of options) s.append(el('option', { value: o.value, selected: o.value === value ? true : null }, o.label));
+  const opt = o => el('option', { value: o.value, selected: o.value === value ? true : null }, o.label);
+  for (const o of options) s.append(o.options ? el('optgroup', { label: o.label }, o.options.map(opt)) : opt(o));
   return s;
 }
 
