@@ -49,6 +49,7 @@ controls; `/cache/` and `forge.local.json` are never served.
 | `#/data` | Data & sources | Live reachability check, full endpoint inventory, terms, and the official-API situation |
 | `#/api` | API console | Query every source from the browser: AoE4 World, static game data, the official World's Edge API (through the companion proxy) and the companion itself. Endpoint catalogue with parameter hints and player-id lookup, raw-path mode, POST with a JSON body for Cup actions, response as a collapsible tree / raw JSON / sortable table, path and JavaScript-expression drilling, copy as URL / curl / Python / CLI, download, history and saved requests (this browser only). `tools/api.py` is the terminal twin, with a `shell` mode |
 | `#/mygames` | My games (local companion) | Every game on your record with official counters and replay analysis: filter by mode, friend, tag, result, data availability; rows open the game summary from your perspective |
+| `#/findings` | Findings (local companion) | Studies across your games with the sample sizes and intervals that go with them. The first, **Closing out leads**: how often a resource lead (what you ordered minus what the opponent ordered, net of cancels, held for two minutes) becomes a win, mirrored against what opponents do with the same lead against you, by lead size at 10:00/15:00/20:00 and by final game length; the median lead trajectory of converted against lost leads with quartile bands; what differs in the five minutes after a lead is taken; the anatomy of lost leads (what each side did from the peak until the lead was gone); and a review queue of the biggest leads lost that opens each game. Filters: player (you or a friend as a benchmark), mode, civ, opponent civ, period, lead threshold, checkpoint |
 
 Profiles also carry replay-derived **Playstyle** (identity tags with frequencies, medians for villagers by 10:00,
 age-up times, early military, Town Centers, military spend share, APM, army composition) and **Records**
@@ -69,6 +70,16 @@ team, so renamed players and clan-tag changes no longer lose the game. The offic
 **map seed** (`rnd`), biome and layout ids; they are stored per game and the game summary shows the seed.
 `tools/corpus_estimate.py` counts how many games of a civ matchup or map the top-N players produce (see
 [docs/CORPUS_ESTIMATE.md](docs/CORPUS_ESTIMATE.md)).
+
+**Findings.** Every stored summary carries the per-minute order totals of its player (`minutes`: total and military spend,
+villagers, military units, buildings, technologies and cancels per minute), so studies across games read the store and
+never the replays. `tools/closing.py` is the first: it pairs both players of each 1v1, builds the lead series, and reports
+conversion by lead size and game length (with the opponents' mirror), the lead trajectory, the window after a lead, the
+collapse of lost leads and the games to review, with 95% Wilson intervals on rates, Newcombe intervals on differences of
+rates, percentile-bootstrap intervals on medians and the rank AUC as effect size, standard library only. The page reads
+`/local/closing/:id` (`lead=`, `kind=`, `civ=`, `vs=`, `since=`, `until=`); `py -3 tools/closing.py 6520235` prints the
+same report in a terminal. After a parser or summary change, `py -3 tools/reanalyze.py` rebuilds every summary from the
+replay files, and from the cached analyses for games whose file is gone.
 
 **Look.** The default theme is *Castle stone*: dark basalt surfaces, torchlight gold, headings and the wordmark in a
 system serif (Palatino Linotype / Palatino / Georgia, nothing downloaded), a gold hairline under every card title and
@@ -151,10 +162,12 @@ js/api.js             aoe4world client with memory + sessionStorage cache; Relic
 js/constants.js       civilizations, ladders, rank tiers, official ladder ids
 js/util.js            DOM builder (text-safe), formatting, routing helpers, colour maths
 js/components.js      player chips, flags, rank badges, tables, pagination, game rows, search box, tooltip
-js/charts.js          SVG line chart (crosshair tooltip, direct end labels, keyboard), sparkline, heatmap
+js/charts.js          SVG line chart (crosshair tooltip, direct end labels, keyboard, lo–hi bands), dot-and-interval chart, sparkline, heatmap, radar
 js/pages/*.js         one module per route
 server.py             static server + World's Edge proxy (allow-list, 60 s cache) + companion endpoints
 tools/api.py          terminal client for every source (`py -3 tools/api.py aoe4world /players/ID`, `shell` for a REPL)
+tools/closing.py      the "closing out leads" study behind Findings (also a terminal report)
+tools/reanalyze.py    rebuild every stored summary after a parser or summary change
 assets/flags/*.png    civilization flags
 docs/API_FINDINGS.md  research notes on every data source
 ```

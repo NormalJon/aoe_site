@@ -38,7 +38,7 @@ function bisect(points, x) {
  * Multi-series line chart over time.
  * series: [{ name, color ('--s1' or css color), points: [{x: ms, y, meta?}] }]
  */
-export function lineChart({ series, height = 260, yFormat = v => fmt.int(v), xIsTime = true, xFormat = null, markers = [], directLabels = true, legend = true, area = null, yDomain = null, xDomain = null, emptyText = 'Not enough data to chart' }) {
+export function lineChart({ series, height = 260, yFormat = v => fmt.int(v), xIsTime = true, xFormat = null, markers = [], directLabels = true, legend = true, area = null, yDomain = null, xDomain = null, baseline = null, emptyText = 'Not enough data to chart' }) {
   const root = el('div', { class: 'chart' });
   const data = series.filter(s => s.points && s.points.length).map(s => ({ ...s, points: [...s.points].sort((a, b) => a.x - b.x) }));
   if (!data.length || data.every(s => s.points.length < 2)) { root.append(el('div', { class: 'chart-empty' }, emptyText)); return root; }
@@ -53,9 +53,10 @@ export function lineChart({ series, height = 260, yFormat = v => fmt.int(v), xIs
     const W = Math.max(240, width), H = height;
     const pw = W - M.left - M.right, ph = H - M.top - M.bottom;
     const all = data.flatMap(s => s.points);
+    const bandYs = data.flatMap(s => (s.band || []).flatMap(b => [b.lo, b.hi])).filter(Number.isFinite);   // optional lo–hi band per series
     let x0 = Math.min(...all.map(p => p.x)), x1 = Math.max(...all.map(p => p.x));
     if (xDomain) { x0 = xDomain[0]; x1 = xDomain[1]; }
-    let yMin = Math.min(...all.map(p => p.y)), yMax = Math.max(...all.map(p => p.y));
+    let yMin = Math.min(...all.map(p => p.y), ...bandYs), yMax = Math.max(...all.map(p => p.y), ...bandYs);
     if (yDomain) { yMin = yDomain[0]; yMax = yDomain[1]; }
     const pad = (yMax - yMin) * 0.08 || 10;
     const { ticks, lo, hi } = niceTicks(yMin >= 0 && !yDomain ? Math.max(0, yMin - pad) : yMin - pad, yMax + pad, 4);
@@ -71,7 +72,7 @@ export function lineChart({ series, height = 260, yFormat = v => fmt.int(v), xIs
     // baseline + x ticks
     svg.append(svgEl('line', { class: 'axis-line', x1: M.left, x2: W - M.right, y1: M.top + ph, y2: M.top + ph }));
     const span = x1 - x0;
-    const xt = timeTicks(x0, x1, Math.max(2, Math.min(6, Math.floor(pw / 110))));
+    const xt = xIsTime ? timeTicks(x0, x1, Math.max(2, Math.min(6, Math.floor(pw / 110)))) : niceTicks(x0, x1, Math.max(2, Math.min(8, Math.floor(pw / 80)))).ticks.filter(t => t >= x0 - 1e-9 && t <= x1 + 1e-9);
     xt.forEach((t, i) => svg.append(svgEl('text', { class: 'tick', x: sx(t), y: H - 6, 'text-anchor': i === 0 ? 'start' : i === xt.length - 1 ? 'end' : 'middle' }, fx ? fx(t) : timeLabel(t, span))));
     // vertical markers (e.g. age-ups), drawn under the series
     for (const m of markers) {
@@ -80,6 +81,14 @@ export function lineChart({ series, height = 260, yFormat = v => fmt.int(v), xIs
       if (m.label) svg.append(svgEl('text', { class: 'marker-label', x: sx(m.x) + 3, y: M.top + 10 + (m.row || 0) * 12, fill: resolveColor(m.color) || 'var(--muted)' }, m.label));
     }
 
+    // lo–hi bands (interquartile ranges, say), under the lines
+    data.forEach(s => {
+      const band = (s.band || []).filter(b => Number.isFinite(b.lo) && Number.isFinite(b.hi)).sort((a, b) => a.x - b.x);
+      if (band.length < 2) return;
+      const d = band.map((b, i) => `${i ? 'L' : 'M'}${sx(b.x).toFixed(1)},${sy(b.hi).toFixed(1)}`).join('') + [...band].reverse().map(b => `L${sx(b.x).toFixed(1)},${sy(b.lo).toFixed(1)}`).join('') + 'Z';
+      svg.append(svgEl('path', { class: 'series-band', d, fill: resolveColor(s.color) }));
+    });
+    if (baseline !== null && Number.isFinite(baseline) && baseline >= lo && baseline <= hi) svg.append(svgEl('line', { class: 'axis-line', x1: M.left, x2: W - M.right, y1: sy(baseline), y2: sy(baseline) }));
     // series
     data.forEach(s => {
       const color = resolveColor(s.color);
@@ -142,6 +151,65 @@ export function lineChart({ series, height = 260, yFormat = v => fmt.int(v), xIs
   if (typeof ResizeObserver !== 'undefined') {
     let last = 0;
     ro = new ResizeObserver(entries => { const w = Math.round(entries[0].contentRect.width); if (w && Math.abs(w - last) > 8) { last = w; render(w); } });
+    ro.observe(root);
+  }
+  queueMicrotask(start);
+  return root;
+}
+
+/**
+ * Dot-and-interval chart: one group per category along the x axis, one dot per series inside each group with a
+ * vertical line for its interval (a rate with its confidence interval, typically). The table twin is the caller's.
+ * groups: [{ label, sub, values: { [seriesKey]: { value, lo, hi, n } | null } }]   series: [{ key, name, color }]
+ */
+export function intervalChart({ groups, series, height = 230, yFormat = v => `${Math.round(v)}%`, yDomain = [0, 100], refLine = null, ariaLabel = 'Rates with intervals', emptyText = 'Not enough data to chart' }) {
+  const root = el('div', { class: 'chart' });
+  const live = groups.filter(g => series.some(s => g.values[s.key] && Number.isFinite(g.values[s.key].value)));
+  if (!live.length) { root.append(el('div', { class: 'chart-empty' }, emptyText)); return root; }
+  const GAP = 18;                                   // between the dots of one group; the hit area is the same width
+  function render(width) {
+    clear(root);
+    const M = { top: 14, right: 16, bottom: 40, left: 44 };
+    const W = Math.max(240, width), H = height, pw = W - M.left - M.right, ph = H - M.top - M.bottom;
+    const [lo, hi] = yDomain;
+    const sy = y => M.top + ph - (Math.max(lo, Math.min(hi, y)) - lo) / (hi - lo) * ph;
+    const slot = pw / groups.length;
+    const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: 'img', 'aria-label': ariaLabel });
+    for (const t of niceTicks(lo, hi, 4).ticks) {
+      if (t < lo || t > hi) continue;
+      svg.append(svgEl('line', { class: 'grid-line', x1: M.left, x2: W - M.right, y1: sy(t), y2: sy(t) }));
+      svg.append(svgEl('text', { class: 'tick', x: M.left - 8, y: sy(t) + 4, 'text-anchor': 'end' }, yFormat(t)));
+    }
+    if (refLine !== null && refLine >= lo && refLine <= hi) svg.append(svgEl('line', { class: 'ref-line', x1: M.left, x2: W - M.right, y1: sy(refLine), y2: sy(refLine) }));
+    svg.append(svgEl('line', { class: 'axis-line', x1: M.left, x2: W - M.right, y1: M.top + ph, y2: M.top + ph }));
+    groups.forEach((g, gi) => {
+      const cx0 = M.left + slot * (gi + 0.5);
+      svg.append(svgEl('text', { class: 'group-label', x: cx0, y: H - 22, 'text-anchor': 'middle' }, g.label));
+      if (g.sub) svg.append(svgEl('text', { class: 'group-sub', x: cx0, y: H - 8, 'text-anchor': 'middle' }, g.sub));
+      const present = series.filter(s => g.values[s.key] && Number.isFinite(g.values[s.key].value));
+      present.forEach((s, si) => {
+        const v = g.values[s.key], color = resolveColor(s.color);
+        const cx = cx0 + (si - (present.length - 1) / 2) * GAP;
+        if (Number.isFinite(v.lo) && Number.isFinite(v.hi)) svg.append(svgEl('line', { class: 'interval', x1: cx, x2: cx, y1: sy(v.hi), y2: sy(v.lo), stroke: color }));
+        svg.append(svgEl('circle', { class: 'dot', cx, cy: sy(v.value), r: 4.5, fill: color }));
+        const hit = svgEl('rect', { class: 'hit item', x: cx - GAP / 2, y: M.top, width: GAP, height: ph, tabindex: 0, 'aria-label': `${g.label}, ${s.name}: ${yFormat(v.value)}` });
+        const tt = () => ttRows(`${g.label} · ${s.name}`, [{ label: 'rate', value: yFormat(v.value), color },
+          ...(Number.isFinite(v.lo) ? [{ label: '95% interval', value: `${yFormat(v.lo)} – ${yFormat(v.hi)}` }] : []),
+          ...(v.n !== undefined && v.n !== null ? [{ label: 'games', value: fmt.int(v.n) }] : [])]);
+        hit.addEventListener('pointermove', e => showTooltip(e.clientX, e.clientY, tt()));
+        hit.addEventListener('pointerleave', hideTooltip);
+        hit.addEventListener('focus', () => { const b = hit.getBoundingClientRect(); showTooltip(b.left + b.width / 2, b.top + 24, tt()); });
+        hit.addEventListener('blur', hideTooltip);
+        svg.append(hit);
+      });
+    });
+    root.append(svg);
+    if (series.length > 1) root.append(el('div', { class: 'legend' }, series.map(s => el('span', { class: 'key' }, el('i', { class: 'dot', style: { '--c': resolveColor(s.color) } }), s.name))));
+  }
+  const start = () => { const w = root.clientWidth || root.parentElement?.clientWidth || 720; render(w); };
+  if (typeof ResizeObserver !== 'undefined') {
+    let last = 0;
+    const ro = new ResizeObserver(entries => { const w = Math.round(entries[0].contentRect.width); if (w && Math.abs(w - last) > 8) { last = w; render(w); } });
     ro.observe(root);
   }
   queueMicrotask(start);

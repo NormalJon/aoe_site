@@ -297,6 +297,44 @@ def stats_for(profile_id, civ=None, kinds=None, limit=None):
         return [json.loads(r['json']) for r in con.execute(sql, args)]
 
 
+def stats_for_games(game_ids, exclude_profile=None):
+    """Every stored summary of the given games, {game_id: {profile_id: summary}}, optionally leaving one player out
+    (the other side of each of that player's games, in one query)."""
+    out = {}
+    ids = [int(g) for g in game_ids]
+    if not ids:
+        return out
+    with closing(connect()) as con:
+        for chunk in _chunks(ids):
+            sql = f"SELECT game_id, profile_id, json FROM player_stats WHERE game_id IN ({','.join('?' * len(chunk))})"
+            args = list(chunk)
+            if exclude_profile is not None:
+                sql += ' AND profile_id <> ?'
+                args.append(int(exclude_profile))
+            for r in con.execute(sql, args):
+                out.setdefault(r['game_id'], {})[r['profile_id']] = json.loads(r['json'])
+    return out
+
+
+def players_for_games(game_ids):
+    """The API player rows (name, civ, team, result, rating, rating_diff) of the given games: {game_id: {profile_id: row}}."""
+    out = {}
+    ids = [int(g) for g in game_ids]
+    if not ids:
+        return out
+    with closing(connect()) as con:
+        for chunk in _chunks(ids):
+            for r in con.execute(f"SELECT * FROM game_players WHERE game_id IN ({','.join('?' * len(chunk))})", chunk):
+                out.setdefault(r['game_id'], {})[r['profile_id']] = dict(r)
+    return out
+
+
+def stale_game_ids(v):
+    """Games with at least one summary older than version `v` (candidates for a rebuild)."""
+    with closing(connect()) as con:
+        return [r['game_id'] for r in con.execute('SELECT DISTINCT game_id FROM player_stats WHERE v < ? ORDER BY game_id', (int(v),))]
+
+
 def stats_count(profile_id=None):
     with closing(connect()) as con:
         if profile_id is None:
@@ -377,6 +415,19 @@ def official_ids(game_ids):
         for chunk in _chunks(ids):
             have.update(r['game_id'] for r in con.execute(f"SELECT game_id FROM official_matches WHERE game_id IN ({','.join('?' * len(chunk))})", chunk))
     return have
+
+
+def counters_for_games(game_ids):
+    """Stored official counters of the given games: {game_id: {profile_id: row}}."""
+    out = {}
+    ids = [int(g) for g in game_ids]
+    if not ids:
+        return out
+    with closing(connect()) as con:
+        for chunk in _chunks(ids):
+            for r in con.execute(f"SELECT game_id, profile_id, json FROM counters WHERE game_id IN ({','.join('?' * len(chunk))})", chunk):
+                out.setdefault(r['game_id'], {})[r['profile_id']] = json.loads(r['json'])
+    return out
 
 
 def counters_for(profile_id):

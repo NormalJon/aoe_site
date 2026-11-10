@@ -8,7 +8,9 @@ cached analyses are rebuilt rather than reused):
 
 Restart the companion afterwards so it serves the new analyses.
 """
+import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -38,6 +40,21 @@ def main():
         if i % 50 == 0 or i == len(rows):
             print(f'{i}/{len(rows)} replays · {done} analysed · {players} player summaries · {missing} without file or game record · '
                   f'{failed} unreadable · {time.time() - t0:.0f}s', flush=True)
+    # summaries imported from the old JSON caches have no replay file on record, but the cached analysis of the game
+    # is often still here: rebuild every perspective of those games from it
+    rebuilt, stale = 0, 0
+    for gid in store.stale_game_ids(replays.SUMMARY_V):
+        stale += 1
+        files = [f for f in (replays.CACHE / 'analysis').glob(f'M_{gid}*.{replays.ANALYSIS_V}.json') if re.match(rf'M_{gid}(\D|$)', f.name)]
+        g = store.game(gid)
+        if not files or g is None:
+            continue
+        try:
+            a = json.loads(max(files, key=lambda f: f.stat().st_mtime).read_text(encoding='utf-8'))
+            rebuilt += len(replays.store_perspectives(g, a, 'cached'))
+        except Exception as e:  # noqa: BLE001
+            print(f'  {gid}: {e}')
+    print(f'{stale} games still had older summaries · {rebuilt} player summaries rebuilt from cached analyses (no replay file on record)')
     if '--clean' in sys.argv:
         removed = 0
         for f in (replays.CACHE / 'analysis').glob('*.json'):

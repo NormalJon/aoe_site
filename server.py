@@ -15,6 +15,7 @@ Usage:
 import json
 import mimetypes
 import os
+import re
 import sys
 import threading
 import time
@@ -31,7 +32,7 @@ ADMIN_ACTIONS = {"reset", "clock", "seed_demo", "form_brackets"}
 PRIVATE_PREFIXES = ("/cache/", "/forge.local.json", "/.git")
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
-from tools import harvest, replays, store, tournament  # noqa: E402
+from tools import closing, harvest, replays, store, tournament  # noqa: E402
 
 RELIC_BASE = "https://aoe-api.worldsedgelink.com/community/"
 ALLOWED = {
@@ -125,6 +126,16 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json(200, harvest.status(pid))
             if parts == ["store"]:
                 return self.send_json(200, store.summary())
+            if len(parts) == 2 and parts[0] == "closing" and parts[1].isdigit():   # closing out leads, for any player with stored 1v1 replays
+                kinds = [k for k in (q.get("kind") or "").split(",") if k] or None
+                civ, vs = q.get("civ") or None, q.get("vs") or None
+                since, until = q.get("since") or None, q.get("until") or None
+                if any(c and not c.replace("_", "").isalnum() for c in (civ, vs, *(kinds or []))):
+                    return self.send_json(400, {"error": "bad civ or kind"})
+                if any(d and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", d) for d in (since, until)):
+                    return self.send_json(400, {"error": "since/until must be YYYY-MM-DD"})
+                lead = max(100, min(5000, int(q["lead"]))) if q.get("lead", "").isdigit() else closing.LEAD
+                return self.send_json(200, closing.report(int(parts[1]), kinds=kinds, civ=civ, vs=vs, since=since, until=until, lead=lead))
             if len(parts) == 2 and parts[0] == "game" and parts[1].isdigit():
                 prof = q.get("profile")
                 if not (prof and prof.isdigit()) and not cfg.get("me"):

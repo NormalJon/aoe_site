@@ -934,7 +934,8 @@ def game_detail(cfg, game_id, fetch=False, profile=None):
 PROFILE_FIELDS = ('villagers', 'villagers_by_10', 'military', 'military_by_6', 'military_by_8', 'military_by_10', 'military_by_12', 'town_centers', 'ages',
                   'apm_replay', 'commands', 'first_military', 'spend_total', 'spend_military', 'defense_total', 'defense_by_12', 'by_role', 'military_by_unit', 'last_villager', 'villager_gap',
                   'traders', 'monks', 'cancels')
-SUMMARY_V = 3                     # bump when _summarize gains fields; older stored summaries are rebuilt from the cached analysis
+SUMMARY_V = 4                     # bump when _summarize gains fields; older stored summaries are rebuilt from the cached analysis (tools/reanalyze.py)
+MINUTE_SERIES = ('mil_spend', 'villagers', 'military', 'buildings', 'techs', 'cancels')   # per-minute buckets kept in every summary, plus total spend
 MIL_ROLE_SET = {'cavalry', 'ranged', 'infantry', 'siege', 'naval', 'other'}
 
 
@@ -958,6 +959,10 @@ def _summarize(rp, g, me, a, status):
     early = Counter(x['name'] for x in rp.get('build_order') or [] if x['time'] < 300)
     first_mil_b = next((x for x in rp.get('build_order') or [] if any(w in x['name'].lower() for w in MIL_BUILDINGS)), None)
     s = {k: rp.get(k) for k in PROFILE_FIELDS}
+    # the per-minute order totals (net of cancels) as parallel int lists, so cross-game analyses such as tools/closing.py
+    # can compare both players of a game minute by minute without re-reading the replay analysis
+    pm = rp.get('per_minute') or []
+    s['minutes'] = {'spend': [x.get('mil_spend', 0) + x.get('eco_spend', 0) for x in pm], **{k: [x.get(k, 0) for x in pm] for k in MINUTE_SERIES}}
     # what happened before the age-ups: military queued in the Dark Age (the "Dark Age spearman" tell), military
     # queued in Feudal, buildings placed before Feudal, the first technologies, and whether Castle came before any army
     feudal_t, castle_t = _age_time(rp, 2), _age_time(rp, 3)
