@@ -16,6 +16,7 @@ import * as game from './pages/game.js';
 import * as tournament from './pages/tournament.js';
 import * as apiConsole from './pages/api.js';
 import * as findings from './pages/findings.js';
+import * as draft from './pages/draft.js';
 import { initTheme, setTheme, currentTheme } from './theme.js';
 
 /** #/player/me → the configured or chosen profile; explains how to set one otherwise. */
@@ -46,6 +47,7 @@ const routes = [
   { test: p => p[0] === 'api', page: apiConsole, nav: 'api' },
   { test: p => p[0] === 'mygames', page: mygames, nav: 'mygames' },
   { test: p => p[0] === 'findings', page: findings, nav: 'findings' },
+  { test: p => p[0] === 'draft', page: draft, nav: 'draft' },
   { test: p => p[0] === 'scout', page: { render: app => { app.append(notice(el('strong', {}, 'Scout moved. '), 'Opponent intel now lives on the profile page: open ', el('a', { href: '#/player/me' }, 'My profile'), ' — in a game the panel fills in by itself, otherwise use "Scout ahead".')); } }, nav: 'me' },
 ];
 const notFound = { page: { render: app => { app.append(notice('Page not found. ', el('a', { href: '#/' }, 'Go home'))); } }, nav: null };

@@ -32,7 +32,7 @@ ADMIN_ACTIONS = {"reset", "clock", "seed_demo", "form_brackets"}
 PRIVATE_PREFIXES = ("/cache/", "/forge.local.json", "/.git")
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
-from tools import closing, harvest, replays, store, tournament  # noqa: E402
+from tools import closing, draft, harvest, replays, store, tournament  # noqa: E402
 
 RELIC_BASE = "https://aoe-api.worldsedgelink.com/community/"
 ALLOWED = {
@@ -97,6 +97,28 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception as e:  # noqa: BLE001
                 traceback.print_exc()
                 return self.send_json(500, {"error": str(e)})
+        if len(parts) >= 3 and parts[:2] == ["local", "draft"]:   # the Draft tab: shared action logs
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                if n > 65536:
+                    return self.send_json(413, {"error": "body too large"})
+                body = json.loads(self.rfile.read(n) or b"{}") if n else {}
+                if parts[2:] == ["new"]:
+                    return self.send_json(200, draft.create(body))
+                if len(parts) == 4 and parts[3] in ("join", "leave", "act", "undo"):
+                    return self.send_json(200, getattr(draft, parts[3])(parts[2], body))
+                return self.send_json(404, {"error": "unknown draft endpoint"})
+            except draft.Conflict as e:
+                return self.send_json(409, {"error": str(e), "state": e.state})
+            except draft.Forbidden as e:
+                return self.send_json(403, {"error": str(e)})
+            except KeyError:
+                return self.send_json(404, {"error": "no draft with that code"})
+            except ValueError as e:
+                return self.send_json(400, {"error": str(e)})
+            except Exception as e:  # noqa: BLE001
+                traceback.print_exc()
+                return self.send_json(500, {"error": str(e)})
         return self.send_json(404, {"error": "unknown endpoint"})
 
     # ------------------------------------------------------------------ local companion
@@ -114,6 +136,13 @@ class Handler(SimpleHTTPRequestHandler):
                                             "configured": bool(cfg.get("me")), "companion": True, "admin_required": bool(ADMIN_KEY),
                                             "hosted": HOST not in ("127.0.0.1", "localhost")})
             # --- endpoints that work for any player (no 'me' needed) ---
+            if len(parts) == 2 and parts[0] == "draft":   # Draft tab: the shared action log of one draft
+                try:
+                    return self.send_json(200, draft.get(parts[1]))
+                except KeyError:
+                    return self.send_json(404, {"error": "no draft with that code"})
+                except ValueError as e:
+                    return self.send_json(400, {"error": str(e)})
             if parts == ["tournament", "state"]:
                 as_pid = int(q["as"]) if q.get("as", "").isdigit() else None
                 return self.send_json(200, tournament.get_state(cfg, as_pid))
