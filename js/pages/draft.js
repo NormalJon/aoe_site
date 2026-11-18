@@ -22,8 +22,9 @@ const storage = store => ({
 const ls = storage(localStorage), ss = storage(sessionStorage);
 
 async function companion() { try { return await getJSON('local/config', { ttl: 60e3 }); } catch { return null; } }
-async function localJSON(path, body) {
-  const res = await fetch(`local/draft/${path}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : { headers: { Accept: 'application/json' } });
+async function localJSON(path, body, token) {
+  const headers = token ? { 'X-Seat-Token': token } : {};   // a read with your seat token shows your own pending blind choice
+  const res = await fetch(`local/draft/${path}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) } : { headers: { Accept: 'application/json', ...headers } });
   let data = {}; try { data = await res.json(); } catch { /* not JSON (static host) */ }
   if (!res.ok) { const e = new Error(data.error || `${res.status} ${res.statusText}`); e.status = res.status; e.state = data.state; throw e; }
   return data;
@@ -53,12 +54,12 @@ function onlineStore(code) {
   const seat = () => ss.get(seatKey(code), null);
   return {
     kind: 'online', code, hotseat: false, poll: true,
-    async load() { const d = await localJSON(code); ls.set(backupKey(code), { config: d.config, actions: d.actions, at: Date.now() }); return d; },
+    async load() { const d = await localJSON(code, null, seat()?.token); ls.set(backupKey(code), { config: d.config, actions: d.actions, at: Date.now() }); return d; },
     backup: () => ls.get(backupKey(code), null),
     // A free host restarts when idle and forgets cache/drafts.json; any browser that saw the draft can put it back.
     async restore() {
       const b = ls.get(backupKey(code), null); if (!b) throw new Error('this browser has no copy of the draft');
-      const d = await localJSON('new', { code, config: b.config, actions: b.actions, claim: seat()?.side || null });
+      const d = await localJSON('new', { code, config: b.config, actions: b.actions.filter(a => !a.hidden), claim: seat()?.side || null });   // a blanked blind choice is made again
       if (d.token) ss.set(seatKey(code), { side: d.side, token: d.token }); else ss.del(seatKey(code));
       return d;
     },
@@ -337,8 +338,8 @@ async function room(app, store, route) {
 
     // the current game, as this side sees it
     if (g) {
-      const pair = g.civs[side], hiddenPair = pair && g.stage === 'civs' && !sees(side);
-      const snipedByOpp = g.snipes[D.other(side)], mySnipe = g.snipes[side], hideSnipe = mySnipe && g.stage === 'snipe' && !sees(side);
+      const pair = g.civs[side], hiddenPair = pair && (pair === D.HIDDEN || (g.stage === 'civs' && !sees(side)));
+      const snipedByOpp = g.snipes[D.other(side)], mySnipe = g.snipes[side], hideSnipe = mySnipe && (mySnipe === D.HIDDEN || (g.stage === 'snipe' && !sees(side)));
       const items = [];
       if (!pair) items.push(el('span', { class: 'muted small' }, g.stage === 'civs' ? 'picking two…' : '—'));
       else if (hiddenPair) items.push(civTag(null, { hidden: true }), civTag(null, { hidden: true }));

@@ -115,6 +115,8 @@ export const bannedBy = (st, civ) => (st.civBans.a.includes(civ) ? 'a' : st.civB
 export const civAllowed = (st, side, civ) => !!CIVS[civ] && !isBanned(st, civ) && (!st.pools[side].length || st.pools[side].includes(civ));
 export const civsFor = (st, side) => CIV_IDS.filter(c => civAllowed(st, side, c));
 /** The civ `side` plays in game g once the opponent has sniped: the one of the pair that was not removed. */
+/** A blind choice that is in but blanked by the server (the other side has not answered yet). Truthy, never a civ id. */
+export const HIDDEN = 'hidden';
 export const playing = (g, side) => (g.civs[side] && g.snipes[other(side)] ? g.civs[side].find(c => c !== g.snipes[other(side)]) ?? null : null);
 
 function startGame(st) {
@@ -150,6 +152,8 @@ export function check(st, action) {
   if (action.t !== s.type) return `the next step is ${STEP_LABEL[s.type] || s.type}, not ${STEP_LABEL[action.t] || action.t}`;
   if (s.by !== 'both' && action.side !== s.by) return `it is ${st.names[s.by]}'s turn`;
   const v = action.value, g = st.current;
+  // the server blanks a blind choice the other side has not answered yet: we know it is in, not what it is
+  if (action.hidden) return (action.t === 'game_civs' || action.t === 'game_snipe') && s.waiting.includes(action.side) ? null : 'only a pending blind choice can be hidden';
   switch (action.t) {
     case 'map_ban': case 'map_pick': return openMaps(st).includes(v) ? null : 'that map is not open';
     case 'civ_ban':
@@ -194,10 +198,10 @@ function apply(st, action) {
   }
   const g = st.current;
   if (t === 'game_map') { g.map = value; g.stage = 'civs'; say(`${nm[side]} picked ${value} for game ${g.n}`); }
-  else if (t === 'game_civs') { g.civs[side] = [...value]; if (g.civs.a && g.civs.b) { g.stage = 'snipe'; say(`Game ${g.n}: both pairs are in — ${nm.a}: ${g.civs.a.map(c => CIVS[c].name).join(' + ')}; ${nm.b}: ${g.civs.b.map(c => CIVS[c].name).join(' + ')}`); } }
+  else if (t === 'game_civs') { g.civs[side] = action.hidden ? HIDDEN : [...value]; if (Array.isArray(g.civs.a) && Array.isArray(g.civs.b)) { g.stage = 'snipe'; say(`Game ${g.n}: both pairs are in — ${nm.a}: ${g.civs.a.map(c => CIVS[c].name).join(' + ')}; ${nm.b}: ${g.civs.b.map(c => CIVS[c].name).join(' + ')}`); } }
   else if (t === 'game_snipe') {
-    g.snipes[side] = value;
-    if (g.snipes.a && g.snipes.b) { g.stage = 'result'; say(`Game ${g.n}: ${nm.a} sniped ${CIVS[g.snipes.a].name}, ${nm.b} sniped ${CIVS[g.snipes.b].name} — ${nm.a} plays ${CIVS[playing(g, 'a')].name}, ${nm.b} plays ${CIVS[playing(g, 'b')].name}`); }
+    g.snipes[side] = action.hidden ? HIDDEN : value;
+    if (g.snipes.a && g.snipes.b && g.snipes.a !== HIDDEN && g.snipes.b !== HIDDEN) { g.stage = 'result'; say(`Game ${g.n}: ${nm.a} sniped ${CIVS[g.snipes.a].name}, ${nm.b} sniped ${CIVS[g.snipes.b].name} — ${nm.a} plays ${CIVS[playing(g, 'a')].name}, ${nm.b} plays ${CIVS[playing(g, 'b')].name}`); }
   } else if (t === 'game_result') {
     g.winner = value; g.played = { a: playing(g, 'a'), b: playing(g, 'b') };
     st.games.push(g); st.current = null; st.score[value]++;

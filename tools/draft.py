@@ -2,7 +2,9 @@
 
 The companion does not know the draft rules; js/draft.js derives the state from the log in every browser. The server
 only (1) keeps the log in order with a compare-and-set on its length, so two players clicking at once cannot both win,
-(2) gives each side a seat token so only the browser that joined as Player 1 can act for Player 1, and (3) bounds sizes.
+(2) gives each side a seat token so only the browser that joined as Player 1 can act for Player 1, (3) bounds sizes, and
+(4) blanks the value of a blind choice (two civs, snipe) that the other side has not answered yet, for everyone but the
+seat that made it, so the choice cannot be read from the API before both are in.
 """
 import json
 import re
@@ -18,6 +20,7 @@ CODE_RE = re.compile(r'^[A-Z2-9]{6,12}$')
 MAX_DRAFTS, MAX_ACTIONS, MAX_CONFIG, MAX_ACTION = 300, 500, 20000, 2000
 KEEP_DAYS = 30
 SIDES = ('a', 'b')
+BLIND = ('game_civs', 'game_snipe')   # both sides choose at once; a choice stays hidden until the other side's is in
 
 
 class Conflict(Exception):
@@ -53,8 +56,29 @@ def _save(drafts):
     STORE.write_text(json.dumps(drafts, ensure_ascii=False), encoding='utf-8')
 
 
-def public(code, d):
-    return {'code': code, 'config': d['config'], 'actions': d['actions'], 'version': len(d['actions']),
+def _pending_blind(actions):
+    """Index of the latest blind action whose counterpart from the other side is not in yet, else None.
+
+    Renames may land in between; any other action after a blind one means the pair was complete."""
+    i = len(actions) - 1
+    while i >= 0 and actions[i]['t'] == 'name':
+        i -= 1
+    if i < 0 or actions[i]['t'] not in BLIND:
+        return None
+    j = i - 1
+    while j >= 0 and actions[j]['t'] == 'name':
+        j -= 1
+    if j >= 0 and actions[j]['t'] == actions[i]['t'] and actions[j]['side'] != actions[i]['side']:
+        return None
+    return i
+
+
+def public(code, d, token=None):
+    actions = d['actions']
+    i = _pending_blind(actions)
+    if i is not None and (not token or d['seats'].get(actions[i]['side']) != token):
+        actions = actions[:i] + [{**actions[i], 'value': None, 'hidden': True}] + actions[i + 1:]
+    return {'code': code, 'config': d['config'], 'actions': actions, 'version': len(d['actions']),
             'seats': {s: bool(d['seats'].get(s)) for s in SIDES}, 'created': d['created'], 'updated': d['updated']}
 
 
@@ -105,15 +129,15 @@ def create(body):
             d['seats'][claim] = token
         drafts[code] = d
         _save(drafts)
-        out = public(code, d)
+        out = public(code, d, token)
         out['token'], out['side'] = token, claim if token else None
         return out
 
 
-def get(code):
+def get(code, token=None):
     with _lock:
         drafts = _load()
-        return public(code, _get(drafts, code))
+        return public(code, _get(drafts, code), token)
 
 
 def join(code, body):
@@ -132,7 +156,7 @@ def join(code, body):
             d['seats'][side] = token
             d['updated'] = time.time()
             _save(drafts)
-        out = public(code, d)
+        out = public(code, d, token)
         out['token'], out['side'] = token, side
         return out
 
@@ -161,13 +185,13 @@ def act(code, body):
             raise Forbidden(f"you do not hold the seat of player {'1' if action['side'] == 'a' else '2'}")
         expect = body.get('expect')
         if isinstance(expect, int) and expect != len(d['actions']):
-            raise Conflict(public(code, d))
+            raise Conflict(public(code, d, token))
         if len(d['actions']) >= MAX_ACTIONS:
             raise ValueError('this draft has too many actions')
         d['actions'].append({'t': action['t'], 'side': action['side'], 'value': action.get('value'), 'at': time.time()})
         d['updated'] = time.time()
         _save(drafts)
-        return public(code, d)
+        return public(code, d, token)
 
 
 def undo(code, body):
@@ -184,4 +208,4 @@ def undo(code, body):
         d['actions'].pop()
         d['updated'] = time.time()
         _save(drafts)
-        return public(code, d)
+        return public(code, d, token)

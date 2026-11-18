@@ -138,7 +138,7 @@ class Handler(SimpleHTTPRequestHandler):
             # --- endpoints that work for any player (no 'me' needed) ---
             if len(parts) == 2 and parts[0] == "draft":   # Draft tab: the shared action log of one draft
                 try:
-                    return self.send_json(200, draft.get(parts[1]))
+                    return self.send_json(200, draft.get(parts[1], self.headers.get("X-Seat-Token") or None))
                 except KeyError:
                     return self.send_json(404, {"error": "no draft with that code"})
                 except ValueError as e:

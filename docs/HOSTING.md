@@ -48,6 +48,9 @@ things matter on the free tier:
   unnecessary.
 - Set `FULL_SITE_URL` in `js/constants.js` to the service URL so the GitHub Pages copy sends "Create a shared draft"
   and every other companion feature to the full site.
+- **Blind choices stay blind on the wire.** The server blanks a pending two-civ pick or snipe for everyone except the
+  seat that made it (reads carry the seat token in `X-Seat-Token`), so the other player cannot read it from the API
+  or the browser's developer tools before both are in.
 
 ## B. Docker (any host)
 
