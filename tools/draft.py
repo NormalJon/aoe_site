@@ -78,16 +78,26 @@ def create(body):
     config = body.get('config')
     if not isinstance(config, dict) or len(json.dumps(config)) > MAX_CONFIG:
         raise ValueError('config missing or too large')
+    actions = body.get('actions') or []     # a browser restoring a draft the host forgot sends the log it last saw
+    if not isinstance(actions, list) or len(actions) > MAX_ACTIONS:
+        raise ValueError('bad action list')
+    for a in actions:
+        _check_action(a)
     with _lock:
         drafts = _load()
         code = body.get('code') or ''
-        if code and (not CODE_RE.match(str(code)) or code in drafts):
-            code = ''
+        if code:
+            code = str(code).upper()
+            if not CODE_RE.match(code):
+                raise ValueError('a draft code is 6-12 letters and digits')
+            if code in drafts:
+                raise ValueError('a draft with that code already exists; open it instead')
         while not code or code in drafts:
             code = ''.join(secrets.choice('ABCDEFGHJKLMNPQRSTUVWXYZ23456789') for _ in range(10))
         config['seed'] = code    # the code is the seed: coin flips are reproducible from it
         now = time.time()
-        d = {'config': config, 'actions': [], 'seats': {'a': None, 'b': None}, 'created': now, 'updated': now}
+        d = {'config': config, 'actions': [{'t': a['t'], 'side': a['side'], 'value': a.get('value'), 'at': a.get('at') or now} for a in actions],
+             'seats': {'a': None, 'b': None}, 'created': now, 'updated': now}
         token = None
         claim = body.get('claim')
         if claim in SIDES:

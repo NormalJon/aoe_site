@@ -5,13 +5,13 @@
 import { el, clear, setTitle, hrefTo, navigate, fmt } from '../util.js';
 import { getJSON } from '../api.js';
 import { card, notice, segmented, emptyState, errorBox, skeleton } from '../components.js';
-import { CIVS, civName, civShort, civFlag } from '../constants.js';
+import { CIVS, civName, civShort, civFlag, FULL_SITE_URL } from '../constants.js';
 import { pageHead, companionHint, isLocalHost } from './_shared.js';
 import * as D from '../draft.js';
 
 const LOCAL_KEY = 'forge-draft-hotseat', RECENT_KEY = 'forge-draft-recent', SETUP_KEY = 'forge-draft-setup';
-const seatKey = code => `forge-draft-seat:${code}`;
-const POLL_MS = 2000;
+const seatKey = code => `forge-draft-seat:${code}`, backupKey = code => `forge-draft-backup:${code}`;
+const POLL_MS = 1500;
 const SIDE_LABEL = { a: 'Player 1', b: 'Player 2' };
 
 const storage = store => ({
@@ -53,7 +53,15 @@ function onlineStore(code) {
   const seat = () => ss.get(seatKey(code), null);
   return {
     kind: 'online', code, hotseat: false, poll: true,
-    load: () => localJSON(code),
+    async load() { const d = await localJSON(code); ls.set(backupKey(code), { config: d.config, actions: d.actions, at: Date.now() }); return d; },
+    backup: () => ls.get(backupKey(code), null),
+    // A free host restarts when idle and forgets cache/drafts.json; any browser that saw the draft can put it back.
+    async restore() {
+      const b = ls.get(backupKey(code), null); if (!b) throw new Error('this browser has no copy of the draft');
+      const d = await localJSON('new', { code, config: b.config, actions: b.actions, claim: seat()?.side || null });
+      if (d.token) ss.set(seatKey(code), { side: d.side, token: d.token }); else ss.del(seatKey(code));
+      return d;
+    },
     mySide: () => seat()?.side ?? null,
     act: (action, expect) => localJSON(`${code}/act`, { token: seat()?.token, action, expect }),
     canUndo: doc => { const last = doc?.actions?.at(-1); return !!last && last.side === seat()?.side; },
@@ -144,7 +152,8 @@ async function lobby(app, route) {
     box.append(el('p', { class: 'dr-summary' }, summary));
     const canShare = !!cfg;
     box.append(el('div', { class: 'dr-inline' },
-      el('button', { class: 'btn primary', type: 'button', disabled: ui.busy ? true : null, onClick: createShared, title: canShare ? 'Each player joins from their own browser with the code' : 'Needs the companion server' }, 'Create a shared draft'),
+      canShare || !FULL_SITE_URL ? el('button', { class: 'btn primary', type: 'button', disabled: ui.busy || !canShare ? true : null, onClick: createShared, title: canShare ? 'Each player joins from their own browser with the code' : 'Needs the companion server' }, 'Create a shared draft')
+        : el('a', { class: 'btn primary', href: `${FULL_SITE_URL}#/draft`, rel: 'noopener', title: 'Shared drafts run on the full site' }, 'Create a shared draft on the full site →'),
       el('button', { class: 'btn', type: 'button', disabled: ui.busy ? true : null, onClick: startLocal }, 'Play on this screen (hot seat)')));
     if (!canShare) box.append(el('p', { class: 'muted small', style: { margin: 0 } }, el('strong', {}, 'Shared drafts need the companion. '), ...companionHint(), ' Hot seat works everywhere: both players act on one screen, and blind picks hide themselves until both are in.'));
     else box.append(el('p', { class: 'muted small', style: { margin: 0 } }, 'A shared draft gets a code; you take the seat of ', el('strong', {}, setup.names.a || 'Player 1'), ' and your opponent joins as ', el('strong', {}, setup.names.b || 'Player 2'), ' from any browser that can reach this server. Anyone else with the code spectates.'));
@@ -180,14 +189,17 @@ async function lobby(app, route) {
 async function room(app, store, route) {
   setTitle('Draft');
   const holder = el('div'); app.append(holder); holder.append(skeleton(6, { height: 22 }));
-  const ui = { selected: [], busy: false, error: null, timer: null, editName: null, nameDraft: '', copied: false, onStorage: null };
+  const ui = { selected: [], busy: false, error: null, timer: null, editName: null, nameDraft: '', copied: false, onStorage: null, onVis: null };
   let doc = null, st = null;
 
   async function load() {
     try { doc = await store.load(); } catch (e) {
       clear(holder);
-      const hint = store.kind === 'online' && (e.status === 404 || !e.status) ? (e.status === 404 ? 'No draft has that code on this companion.' : ['Shared drafts need the companion. ', ...companionHint()]) : null;
-      holder.append(pageHead('Draft'), errorBox(e, load), hint ? el('p', { class: 'muted small', style: { marginTop: '10px' } }, hint) : null, el('p', { style: { marginTop: '10px' } }, el('a', { href: hrefTo('/draft') }, '← All drafts')));
+      const backup = store.kind === 'online' && e.status === 404 ? store.backup() : null;
+      const hint = store.kind === 'online' && (e.status === 404 || !e.status) ? (e.status === 404 ? (backup ? 'The server no longer has this draft (a free host restarts when idle and forgets its files), but this browser kept a copy.' : 'No draft has that code on this companion.') : ['Shared drafts need the companion. ', ...companionHint()]) : null;
+      holder.append(pageHead('Draft'), errorBox(e, load), hint ? el('p', { class: 'muted small', style: { marginTop: '10px' } }, hint) : null,
+        backup ? el('p', { class: 'dr-inline' }, el('button', { class: 'btn primary', type: 'button', onClick: async () => { try { await store.restore(); await load(); } catch (err) { alert(`Could not restore: ${err.message}`); } } }, `Restore this draft (${backup.actions.length} actions, saved ${fmt.rel(backup.at)})`), el('span', { class: 'muted small' }, 'Both players take their seats again afterwards.')) : null,
+        el('p', { style: { marginTop: '10px' } }, el('a', { href: hrefTo('/draft') }, '← All drafts')));
       return false;
     }
     st = D.reduce(doc.config, doc.actions);
@@ -226,7 +238,12 @@ async function room(app, store, route) {
     const title = c.title || `${name('a')} vs ${name('b')}`;
     const sub = `${c.preset !== 'custom' ? D.PRESET[c.preset].label : `Best of ${c.bestOf} · custom script`} · first to ${D.needWins(c)}${store.hotseat ? ' · hot seat on this screen' : ` · code ${store.code}`}`;
     const headActions = el('div', { class: 'dr-inline' });
-    if (store.hotseat) headActions.append(el('span', { class: 'muted small' }, 'Acting as'), segmented([{ value: 'a', label: name('a') }, { value: 'b', label: name('b') }], viewer(), v => { store.setActing(v); ui.selected = []; draw(); }, { ariaLabel: 'Acting as' }));
+    if (store.hotseat) {
+      const blindDone = s => step?.by === 'both' && step.waiting.length && !step.waiting.includes(s);   // their blind choice is in: switching back would show it
+      const seg = segmented([{ value: 'a', label: name('a') }, { value: 'b', label: name('b') }], viewer(), v => { if (blindDone(v)) return; store.setActing(v); ui.selected = []; draw(); }, { ariaLabel: 'Acting as' });
+      seg.querySelectorAll('button').forEach((b, i) => { const s = i ? 'b' : 'a'; if (blindDone(s)) { b.disabled = true; b.title = `${name(s)} has already chosen · hidden until both are in`; } });
+      headActions.append(el('span', { class: 'muted small' }, 'Acting as'), seg);
+    }
     else {
       const v = viewer();
       if (v) headActions.append(el('span', { class: `pill dr-you ${v}` }, `You are ${name(v)}`), el('button', { class: 'btn sm ghost', type: 'button', disabled: ui.busy ? true : null, onClick: () => run(() => store.leave()) }, 'Leave seat'));
@@ -456,13 +473,17 @@ async function room(app, store, route) {
 
   if (!(await load())) return;
   if (store.poll) {
-    ui.timer = setInterval(async () => {
+    const tick = async () => {
       if (document.hidden || ui.busy) return;
-      try { const d = await store.load(); if (d.version !== doc.version || JSON.stringify(d.seats) !== JSON.stringify(doc.seats) || d.updated !== doc.updated) { refreshFrom(d); draw(); } } catch { /* next tick */ }
-    }, POLL_MS);
+      try { const d = await store.load(); if (d.version !== doc.version || JSON.stringify(d.seats) !== JSON.stringify(doc.seats) || d.updated !== doc.updated) { refreshFrom(d); draw(); } }
+      catch (e) { if (e.status === 404) { clearInterval(ui.timer); load(); } /* otherwise: next tick */ }
+    };
+    ui.timer = setInterval(tick, POLL_MS);
+    ui.onVis = () => { if (!document.hidden) tick(); };
+    document.addEventListener('visibilitychange', ui.onVis);
   } else {
     ui.onStorage = e => { if (e.key === LOCAL_KEY) load(); };
     window.addEventListener('storage', ui.onStorage);
   }
-  return () => { if (ui.timer) clearInterval(ui.timer); if (ui.onStorage) window.removeEventListener('storage', ui.onStorage); };
+  return () => { if (ui.timer) clearInterval(ui.timer); if (ui.onStorage) window.removeEventListener('storage', ui.onStorage); if (ui.onVis) document.removeEventListener('visibilitychange', ui.onVis); };
 }

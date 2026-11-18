@@ -34,6 +34,21 @@ Good to know on the free tier:
 - Outbound calls to AoE4 World and the official replay store now come from Render's IP, shared by everyone
   using the site, so the replay store's rate limit (HTTP 429) is reached sooner than on your own machine.
 
+### The Draft tab on a hosted companion
+
+Shared drafts (`#/draft`) are the feature friends will use most, and they span an hour or more of play, so two
+things matter on the free tier:
+
+- **Keep the draft tab open between games.** While a room is open each browser polls the server every 1.5 s, which
+  keeps the free instance awake. If everyone closes the tab during a game, the instance sleeps after ~15 minutes and
+  comes back with an empty `cache/drafts.json`.
+- **A forgotten draft can be restored.** Every browser that opened a room keeps a copy of the draft's action log.
+  When the server answers "no draft with that code", the page offers **Restore this draft**; both players then take
+  their seats again and carry on from the last action. A Render persistent disk (paid) or a database makes this
+  unnecessary.
+- Set `FULL_SITE_URL` in `js/constants.js` to the service URL so the GitHub Pages copy sends "Create a shared draft"
+  and every other companion feature to the full site.
+
 ## B. Docker (any host)
 
 ```bash
